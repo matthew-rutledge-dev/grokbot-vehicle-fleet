@@ -1,0 +1,84 @@
+/**
+ * vehicle-fleet MCP: one stdio server.
+ * Reads: cached-first, never wake the vehicle. Commands: hidden unless
+ * TESLA_FLEET_READ_ONLY is explicitly off; each needs confirm=true (dry-run
+ * otherwise) and is signed by the installer's own tesla-http-proxy.
+ * Credentials come only from env / the local token store; nothing is hardcoded.
+ */
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { TokenManager } from "./auth.js";
+import { loadConfig, type Config } from "./config.js";
+import type { ToolContext } from "./context.js";
+import type { Env } from "./env.js";
+import { FleetApiError, LocalRefusal } from "./errors.js";
+import { FleetClient, type FleetClientOptions } from "./fleet.js";
+import { Http, type FetchLike } from "./http.js";
+import { RateLimiter } from "./ratelimit.js";
+import { READ_ONLY_ENV } from "./readonly.js";
+import { redactSecrets } from "./redact.js";
+import { jsonResult } from "./result.js";
+import { TokenStore } from "./tokenstore.js";
+import { findTool, isVisible, listTools } from "./tools.js";
+import { ENV_LOCATION_NAME } from "./tools/names.js";
+import { SERVER_NAME, VERSION } from "./version.js";
+
+export type ServerDeps = {
+  env?: Env;
+  config?: Config;
+  fetchImpl?: FetchLike;
+  fleetOptions?: FleetClientOptions;
+};
+
+export function buildContext(deps: ServerDeps = {}): ToolContext {
+  const env = deps.env ?? process.env;
+  const config = deps.config ?? loadConfig(env);
+  const http = new Http(deps.fetchImpl);
+  const limiter = new RateLimiter();
+  const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter);
+  const fleet = new FleetClient(config, http, tokens, limiter, deps.fleetOptions);
+  return { config, fleet, tokens, env };
+}
+
+export function createServer(ctx: ToolContext): Server {
+  const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled };
+  const secrets = () => [ctx.config.refreshTokenSeed];
+  const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listTools(mode) }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const name = request.params.name;
+    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    const def = findTool(name);
+    if (!def) return jsonResult({ ok: false, error: `Unknown tool: ${name}` }, true);
+    if (!isVisible(def, mode)) {
+      if (def.kind === "command") {
+        return jsonResult({
+          ok: false, readOnly: true, sent: false,
+          error: `Refused: ${name} is a command tool and the server is read-only (${READ_ONLY_ENV} not explicitly off). Nothing was sent.`,
+        }, true);
+      }
+      return jsonResult({
+        ok: false, locationEnabled: false,
+        error: `Refused: ${name} needs ${ENV_LOCATION_NAME} on (opt-in). Nothing was read.`,
+      }, true);
+    }
+    try {
+      return jsonResult(await def.handler(args, ctx));
+    } catch (err) {
+      let body: Record<string, unknown>;
+      if (err instanceof LocalRefusal) {
+        body = { ok: false, sent: false, code: err.code, error: err.message, hint: err.hint, ...(err.extra ?? {}) };
+      } else if (err instanceof FleetApiError) {
+        body = { ok: false, ...err.info, error: err.info.message };
+      } else {
+        body = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+      return { ...jsonResult(JSON.parse(redactSecrets(JSON.stringify(body), secrets())), true) };
+    }
+  });
+
+  return server;
+}
+

@@ -1,0 +1,25 @@
+{
+  "mcpServers": {
+    "vehicle-fleet": {
+      "command": "node",
+      "args": [
+        "${GROK_PLUGIN_ROOT}/mcp/vehicle-fleet/dist/index.js"
+      ],
+      "cwd": "${GROK_PLUGIN_ROOT}/mcp/vehicle-fleet",
+      "env": {
+        "TESLA_CLIENT_ID": "${TESLA_CLIENT_ID}",
+        "TESLA_REFRESH_TOKEN": "${TESLA_REFRESH_TOKEN}",
+        "TESLA_FLEET_REGION": "${TESLA_FLEET_REGION}",
+        "TESLA_FLEET_BASE_URL": "${TESLA_FLEET_BASE_URL}",
+        "TESLA_COMMAND_PROXY_URL": "${TESLA_COMMAND_PROXY_URL}",
+        "TESLA_COMMAND_PROXY_CA_CERT": "${TESLA_COMMAND_PROXY_CA_CERT}",
+        "TESLA_TOKEN_STORE": "${TESLA_TOKEN_STORE}",
+        "TESLA_FLEET_READ_ONLY": "${TESLA_FLEET_READ_ONLY}",
+        "TESLA_FLEET_ENABLE_LOCATION": "${TESLA_FLEET_ENABLE_LOCATION}",
+        "TESLA_DEFAULT_VIN": "${TESLA_DEFAULT_VIN}",
+        "TESLA_FLEET_KEY_DOMAIN": "${TESLA_FLEET_KEY_DOMAIN}",
+        "GROK_PLUGIN_DATA": "${GROK_PLUGIN_DATA}"
+      }
+    }
+  }
+}

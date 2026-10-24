@@ -1,0 +1,125 @@
+/** Fleet API error mapping (developer.tesla.com, Conventions -> Response Codes). */
+
+export type FleetErrorInfo = {
+  status: number;
+  code: string;
+  message: string;
+  hint?: string;
+  retryAfterSec?: number;
+  /** Tesla bills every response below 500 (Billing and Limits). */
+  billed: boolean;
+};
+
+export class FleetApiError extends Error {
+  readonly info: FleetErrorInfo;
+  constructor(info: FleetErrorInfo) {
+    super(info.message);
+    this.name = "FleetApiError";
+    this.info = info;
+  }
+}
+
+/** Local refusal that never reached the network (not billed). */
+export class LocalRefusal extends Error {
+  readonly code: string;
+  readonly hint?: string;
+  readonly extra?: Record<string, unknown>;
+  constructor(code: string, message: string, hint?: string, extra?: Record<string, unknown>) {
+    super(message);
+    this.name = "LocalRefusal";
+    this.code = code;
+    this.hint = hint;
+    this.extra = extra;
+  }
+}
+
+function parseRetryAfter(headers: Headers | undefined): number | undefined {
+  if (!headers) return undefined;
+  for (const h of ["retry-after", "ratelimit-reset"]) {
+    const v = headers.get(h);
+    if (v && /^\d+$/.test(v.trim())) return Number(v.trim());
+  }
+  return undefined;
+}
+
+function str(v: unknown): string {
+  return typeof v === "string" ? v : "";
+}
+
+export function mapFleetError(
+  status: number,
+  body: unknown,
+  headers?: Headers,
+): FleetApiError {
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const err = str(b.error);
+  const desc = str(b.error_description);
+  const text = `${err} ${desc}`.toLowerCase();
+  const billed = status < 500;
+  const base = { status, billed };
+  const mk = (code: string, message: string, hint?: string, extra: Partial<FleetErrorInfo> = {}) =>
+    new FleetApiError({ ...base, code, message, hint, ...extra });
+
+  switch (status) {
+    case 401:
+      if (text.includes("login_required"))
+        return mk("login_required", "Refresh token expired, already used, revoked, or the password was reset.",
+          "Re-consent with scripts/auth-helper.mjs (skill vehicle-fleet-setup), then reload the MCP server.");
+      if (text.includes("mobile_access_disabled"))
+        return mk("mobile_access_disabled", "The vehicle has remote (mobile) access turned off.",
+          "Enable mobile access in the vehicle's settings.");
+      return mk("unauthorized", "Access token rejected or expired.");
+    case 402:
+      return mk("payment_required", "The developer account needs a payment method or a higher billing limit.",
+        "Check billing on the developer portal.");
+    case 403:
+      if (text.includes("command protocol"))
+        return mk("command_protocol_required", "This vehicle requires signed commands (Vehicle Command Protocol).",
+          "Set TESLA_COMMAND_PROXY_URL to your own tesla-http-proxy.");
+      return mk("forbidden", "Not authorized: a required OAuth scope is probably missing.",
+        "Re-consent with the scopes this tool needs (see skill vehicle-fleet-troubleshoot).");
+    case 404:
+      return mk("not_found", desc || err || "Resource not found (or no cached data for this vehicle).");
+    case 408:
+      return mk("vehicle_unavailable", "Vehicle is asleep, offline, or has poor connectivity (this request was still billed).",
+        "Do not retry in a loop. Ask the user before calling wake_vehicle, or try again later.");
+    case 412:
+      if (text.includes("regist"))
+        return mk("partner_not_registered", "The developer app is not registered in this region.",
+          "Call the partner register endpoint for this region (skill vehicle-fleet-setup).");
+      return mk("precondition_failed", desc || err || "Precondition failed (e.g. cached data not supported for this vehicle).");
+    case 421:
+      return mk("wrong_region", "This account is not in the configured Fleet API region.",
+        "Unset TESLA_FLEET_BASE_URL/TESLA_FLEET_REGION to auto-detect, or set the right region.");
+    case 422:
+      if (text.includes("not_paired") || text.includes("unsigned") || text.includes("key"))
+        return mk("virtual_key_missing", "The app's virtual key is not paired with this vehicle.",
+          "Pair the key with https://www.tesla.com/_ak/<your-domain> in the Tesla app.");
+      return mk("invalid_resource", desc || err || "Invalid request data.");
+    case 423:
+      return mk("account_locked", "The account is locked and must be unlocked by Tesla.");
+    case 429:
+      return mk("rate_limited", "Fleet API rate limit reached.", "Wait for retryAfterSec before trying again; do not loop.",
+        { retryAfterSec: parseRetryAfter(headers) });
+    case 451:
+      return mk("unavailable_legal", "Resource unavailable for legal/privacy reasons (often wrong region).");
+    case 540:
+      return mk("device_error", "Vehicle responded with an unexpected error (may need a reboot or service).");
+    default:
+      if (status >= 500)
+        return mk("server_error", `Fleet API server error (${status}); not billed.`, "Try again later.");
+      return mk(err || "http_error", desc || err || `HTTP ${status}`);
+  }
+}
+
+/** Friendly reading of command `reason` values documented on the commands page. */
+export const BENIGN_COMMAND_REASONS: Record<string, string> = {
+  already_set: "Already at the requested value.",
+  is_charging: "Already charging.",
+  complete: "Charging is already complete.",
+  not_charging: "The vehicle was not charging.",
+  disconnected: "No charger is connected.",
+  no_power: "The connected charger is not providing power.",
+  requested: "A start-charge request is already pending.",
+  already_started: "Already started.",
+};

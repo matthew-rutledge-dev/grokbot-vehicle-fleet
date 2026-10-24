@@ -1,0 +1,90 @@
+{
+  "name": "grokbot-vehicle-fleet",
+  "version": "0.1.0",
+  "description": "Vehicle status + confirm-gated commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
+  "author": {
+    "name": "Matthew Rutledge",
+    "url": "https://github.com/matthew-rutledge-dev"
+  },
+  "homepage": "https://github.com/matthew-rutledge-dev/grokbot-vehicle-fleet",
+  "repository": "https://github.com/matthew-rutledge-dev/grokbot-vehicle-fleet",
+  "license": "MIT",
+  "keywords": [
+    "grokbot-vehicle-fleet",
+    "vehicle fleet mcp",
+    "grok-bot",
+    "mcp",
+    "read-only"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "variables": {
+    "type": "object",
+    "properties": {
+      "TESLA_CLIENT_ID": {
+        "type": "string",
+        "title": "Client ID",
+        "description": "Required. YOUR developer app's client ID (developer portal). Each installer uses their own app; credentials are never shared."
+      },
+      "TESLA_REFRESH_TOKEN": {
+        "type": "string",
+        "title": "Refresh token (seed)",
+        "description": "Seed refresh token from YOUR OAuth consent (or run scripts/auth-helper.mjs instead). Used only until the plugin stores its rotated token. Never commit."
+      },
+      "TESLA_CLIENT_SECRET": {
+        "type": "string",
+        "title": "Client secret",
+        "description": "Optional. Used only by the operator-run scripts/auth-helper.mjs for the first code exchange; not passed to the MCP server. Never commit."
+      },
+      "TESLA_FLEET_REGION": {
+        "type": "string",
+        "title": "Region",
+        "description": "Optional. na, eu or cn. Default: auto-detect via /api/1/users/region, then remembered in the token store."
+      },
+      "TESLA_FLEET_BASE_URL": {
+        "type": "string",
+        "title": "Fleet API base URL",
+        "description": "Optional override (https). Wins over region."
+      },
+      "TESLA_COMMAND_PROXY_URL": {
+        "type": "string",
+        "title": "Command proxy URL",
+        "description": "Optional. YOUR tesla-http-proxy base URL, e.g. https://proxy.example.com:4443. Without it, command tools refuse and send nothing."
+      },
+      "TESLA_COMMAND_PROXY_CA_CERT": {
+        "type": "string",
+        "title": "Command proxy CA cert path",
+        "description": "Optional. Path to the PEM your proxy's TLS certificate chains to (or the self-signed cert). TLS verification is never disabled."
+      },
+      "TESLA_TOKEN_STORE": {
+        "type": "string",
+        "title": "Token store path",
+        "description": "Optional. Default: GROK_PLUGIN_DATA/tokens.json, else XDG state (Linux/macOS) or LOCALAPPDATA (Windows) under grokbot-vehicle-fleet/. File mode 0600; holds the rotated refresh token only."
+      },
+      "TESLA_FLEET_READ_ONLY": {
+        "type": "string",
+        "title": "Read-only mode",
+        "description": "Optional. FAILS CLOSED: command tools are exposed ONLY when set to 0, false, no or off. Unset, empty, 1/true/yes/on, or any other value = read-only (commands hidden and refused)."
+      },
+      "TESLA_FLEET_ENABLE_LOCATION": {
+        "type": "string",
+        "title": "Enable location",
+        "description": "Optional opt-in. 1/true/yes/on lists get_location (coarse by default). Anything else = no location tool."
+      },
+      "TESLA_DEFAULT_VIN": {
+        "type": "string",
+        "title": "Default VIN",
+        "description": "Optional default VIN for reads (placeholder 5YJ000000EXAMPLE). Unlock and trunk always need an explicit vin."
+      },
+      "TESLA_FLEET_KEY_DOMAIN": {
+        "type": "string",
+        "title": "Virtual key domain",
+        "description": "Optional. Domain hosting your app's public key; used only to show the pairing link https://www.tesla.com/_ak/<domain>."
+      }
+    },
+    "required": [
+      "TESLA_CLIENT_ID"
+    ]
+  },
+  "logo": "assets/logo.svg"
+}
