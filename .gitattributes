@@ -1,0 +1,7 @@
+# Keep shell scripts LF so Git Bash / Linux shebangs and `set -o …` options work.
+*.sh text eol=lf
+# PowerShell is fine with LF; keep LF for consistency in this repo.
+*.ps1 text eol=lf
+*.ts text eol=lf
+*.json text eol=lf
+*.md text eol=lf

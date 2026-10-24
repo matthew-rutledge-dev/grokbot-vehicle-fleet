@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.*
+*.log
+.DS_Store
+tokens*.json
+*.lock
+auth-state.json
+*.pem
