@@ -95,7 +95,7 @@ export const READ_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "describe_boundary",
-      description: "Shows what this server will and will not do: read-only state, location opt-in, proxy configured, which plugin variables are set (never values), token store status, billable calls this session, and the safety rules. No network call.",
+      description: "Shows what this server will and will not do: read-only state, location opt-in, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async (_args, ctx) => ({
@@ -116,8 +116,20 @@ export const READ_TOOLS: ToolDef[] = [
   {
     kind: "read",
     tool: {
+      name: "get_api_usage",
+      description: "LOCAL ESTIMATE of Fleet API usage and cost from calls made by THIS server only (not Home Assistant or other apps): this and last UTC month, per pricing category (data, command, wake; plus other = not priced, auth = not billed), responses <500 billable vs >=500 not billed, estimated USD before and after the monthly discount. The developer portal billing page is the source of truth. No network call.",
+      inputSchema: { type: "object", properties: {} },
+    },
+    handler: async (_a, ctx) => {
+      await ctx.usage.flush();
+      return ctx.usage.report(ctx.config.rates);
+    },
+  },
+  {
+    kind: "read",
+    tool: {
       name: "api_status",
-      description: "Fleet API health (GET /status, unauthenticated, not billed).",
+      description: "Fleet API health (GET /status, unauthenticated; counted as other by get_api_usage).",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async (_a, ctx) => ({ ok: true, status: await ctx.fleet.apiStatus() }),

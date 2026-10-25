@@ -87,6 +87,14 @@ test("initialize + default (placeholders) = read-only: no command tools", async 
     assert.equal(text(res).readOnly, true);
     const b = text(await c.callTool({ name: "describe_boundary", arguments: {} }));
     assert.match(String(b.readOnlyStatus), /unexpanded placeholder/);
+    assert.equal(names.length, 11);
+    const u = text(await c.callTool({ name: "get_api_usage", arguments: {} }));
+    assert.equal(u.ok, true);
+    assert.equal(u.localEstimate, true);
+    const tm = u.thisMonth as { counts: Record<string, Record<string, number>>; estimate: Record<string, unknown> };
+    for (const cat of ["data", "command", "wake", "other", "auth"]) assert.deepEqual(tm.counts[cat], { billable: 0, notBilled: 0, noResponse: 0 });
+    assert.equal(tm.estimate.beforeDiscountUsd, 0);
+    assert.equal(tm.estimate.afterDiscountUsd, 0);
   } finally {
     await c.close();
   }
@@ -97,6 +105,8 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS].sort());
+    assert.equal(names.length, 22);
+    assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));
     assert.equal(b.dryRun, true);

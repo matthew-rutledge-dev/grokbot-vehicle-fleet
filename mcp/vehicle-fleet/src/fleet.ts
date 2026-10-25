@@ -11,6 +11,7 @@ import { REGION_BASE_URLS, type Config } from "./config.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
 import { unwrap, type Http } from "./http.js";
 import type { RateLimiter } from "./ratelimit.js";
+import type { UsageCategory } from "./usage.js";
 
 export type VehicleSummary = {
   vin: string;
@@ -71,15 +72,15 @@ export class FleetClient {
   }
 
   /** Authenticated call with one retry after a bodiless 401 (expired access token). */
-  private async call(method: "GET" | "POST", url: string, json?: unknown, dispatcher?: Dispatcher, timeoutMs?: number) {
+  private async call(category: UsageCategory, method: "GET" | "POST", url: string, json?: unknown, dispatcher?: Dispatcher, timeoutMs?: number) {
     const token = await this.tokens.getAccessToken();
     try {
-      return await this.http.request({ method, url, token, json, dispatcher, timeoutMs });
+      return await this.http.request({ method, url, token, json, dispatcher, timeoutMs }, category);
     } catch (e) {
       if (e instanceof FleetApiError && e.info.status === 401 && e.info.code === "unauthorized") {
         this.tokens.invalidate();
         const fresh = await this.tokens.getAccessToken();
-        return this.http.request({ method, url, token: fresh, json, dispatcher, timeoutMs });
+        return this.http.request({ method, url, token: fresh, json, dispatcher, timeoutMs }, category);
       }
       throw e;
     }
@@ -93,7 +94,7 @@ export class FleetClient {
     let lastErr: unknown;
     for (const region of ["na", "eu"]) {
       try {
-        const res = await this.call("GET", `${REGION_BASE_URLS[region]}/api/1/users/region`);
+        const res = await this.call("other", "GET", `${REGION_BASE_URLS[region]}/api/1/users/region`);
         const r = unwrap<{ region?: string; fleet_api_base_url?: string }>(res.body);
         const url = r?.fleet_api_base_url;
         if (!url || !/^https:\/\/fleet-api\.prd\.[a-z]+\.vn\.cloud\.tesla\.(com|cn)$/.test(url)) {
@@ -113,7 +114,7 @@ export class FleetClient {
 
   async apiStatus(): Promise<string> {
     const base = await this.resolveBaseUrlNoAuth();
-    const res = await this.http.request({ method: "GET", url: `${base}/status`, timeoutMs: 10_000 }, false);
+    const res = await this.http.request({ method: "GET", url: `${base}/status`, timeoutMs: 10_000 }, "other");
     return typeof res.body === "string" ? res.body : JSON.stringify(res.body ?? "ok");
   }
 
@@ -123,7 +124,7 @@ export class FleetClient {
 
   async listVehicles(): Promise<VehicleSummary[]> {
     const base = await this.resolveBaseUrl();
-    const res = await this.call("GET", `${base}/api/1/vehicles`);
+    const res = await this.call("other", "GET", `${base}/api/1/vehicles`);
     const list = unwrap<VehicleSummary[]>(res.body) ?? [];
     for (const v of list) this.cache.set(`state:${v.vin}`, v);
     return list;
@@ -151,7 +152,7 @@ export class FleetClient {
       if (hit) return hit.value;
     }
     const base = await this.resolveBaseUrl();
-    const res = await this.call("GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}`);
+    const res = await this.call("other", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}`);
     const v = unwrap<VehicleSummary>(res.body);
     this.cache.set(`state:${vin}`, v);
     return v;
@@ -171,7 +172,7 @@ export class FleetClient {
     const hit = this.cache.get<FleetStatus>(`fleet_status:${vin}`, FLEET_STATUS_TTL_MS);
     if (hit) return hit.value;
     const base = await this.resolveBaseUrl();
-    const res = await this.call("POST", `${base}/api/1/vehicles/fleet_status`, { vins: [vin] });
+    const res = await this.call("other", "POST", `${base}/api/1/vehicles/fleet_status`, { vins: [vin] });
     const r = unwrap<Record<string, unknown>>(res.body) ?? {};
     const paired = Array.isArray(r.key_paired_vins) ? (r.key_paired_vins as string[]) : undefined;
     const unpaired = Array.isArray(r.unpaired_vins) ? (r.unpaired_vins as string[]) : undefined;
@@ -195,7 +196,7 @@ export class FleetClient {
     this.limiter.take("data", vin);
     const base = await this.resolveBaseUrl();
     const q = encodeURIComponent(endpoints.join(";"));
-    const res = await this.call("GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data?endpoints=${q}`);
+    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data?endpoints=${q}`);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
@@ -208,7 +209,7 @@ export class FleetClient {
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", vin);
     const base = await this.resolveBaseUrl();
-    const res = await this.call("GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data_cached`);
+    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data_cached`);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
@@ -218,7 +219,7 @@ export class FleetClient {
   async wakeUp(vin: string): Promise<{ state?: string; waitedSec: number }> {
     this.limiter.take("wake", vin);
     const base = await this.resolveBaseUrl();
-    const res = await this.call("POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/wake_up`);
+    const res = await this.call("wake", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/wake_up`);
     let v = unwrap<VehicleSummary>(res.body);
     let waited = 0;
     while (v?.state !== "online" && waited < this.wakeTimeoutMs) {
@@ -246,7 +247,7 @@ export class FleetClient {
     }
     this.limiter.take("command", vin);
     const url = `${this.config.proxyUrl}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`;
-    const res = await this.call("POST", url, body, this.proxy(), 30_000);
+    const res = await this.call("command", "POST", url, body, this.proxy(), 30_000);
     this.cache.deletePrefix(`live:${vin}`);
     this.cache.deletePrefix(`cached:${vin}`);
     return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};

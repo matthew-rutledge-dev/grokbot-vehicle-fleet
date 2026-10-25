@@ -80,6 +80,26 @@
         "type": "string",
         "title": "Virtual key domain",
         "description": "Optional. Domain hosting your app's public key; used only to show the pairing link https://www.tesla.com/_ak/<domain>."
+      },
+      "TESLA_FLEET_RATE_DATA_PER_USD": {
+        "type": "string",
+        "title": "Rate: data calls per USD",
+        "description": "Optional. Local usage estimate only (get_api_usage). Default 500 (Tesla published rate)."
+      },
+      "TESLA_FLEET_RATE_COMMANDS_PER_USD": {
+        "type": "string",
+        "title": "Rate: commands per USD",
+        "description": "Optional. Local usage estimate only. Default 1000."
+      },
+      "TESLA_FLEET_RATE_WAKES_PER_USD": {
+        "type": "string",
+        "title": "Rate: wakes per USD",
+        "description": "Optional. Local usage estimate only. Default 50."
+      },
+      "TESLA_FLEET_MONTHLY_DISCOUNT_USD": {
+        "type": "string",
+        "title": "Monthly discount (USD)",
+        "description": "Optional. Local usage estimate only. Default 10 (Tesla's monthly discount); 0 allowed."
       }
     },
     "required": [

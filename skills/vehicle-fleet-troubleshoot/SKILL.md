@@ -17,3 +17,6 @@ Read [reference.md](reference.md) for the full error table. Short version:
 | `proxy_not_configured` / `command_protocol_required` | no signing proxy | operator sets `TESLA_COMMAND_PROXY_URL` |
 | `rate_limited` / `rate_limited_locally` | too many calls | wait `retryAfterSec` |
 | `state_unknown` | command timed out | read back state; do not resend |
+| `payment_required` (402) / app disabled | billing limit reached or no payment method | `get_api_usage` for a local estimate; operator checks the developer portal billing page and limit |
+
+Cost worries or unexpected bills: `get_api_usage` counts only this server's calls. A much higher portal total means another client (for example Home Assistant) is using the same app.

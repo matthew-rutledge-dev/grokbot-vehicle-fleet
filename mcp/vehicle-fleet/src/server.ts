@@ -21,6 +21,7 @@ import { jsonResult } from "./result.js";
 import { TokenStore } from "./tokenstore.js";
 import { findTool, isVisible, listTools } from "./tools.js";
 import { ENV_LOCATION_NAME } from "./tools/names.js";
+import { UsageTracker, usagePathFor } from "./usage.js";
 import { SERVER_NAME, VERSION } from "./version.js";
 
 export type ServerDeps = {
@@ -28,16 +29,19 @@ export type ServerDeps = {
   config?: Config;
   fetchImpl?: FetchLike;
   fleetOptions?: FleetClientOptions;
+  /** Clock for the usage counter (tests). */
+  now?: () => number;
 };
 
 export function buildContext(deps: ServerDeps = {}): ToolContext {
   const env = deps.env ?? process.env;
   const config = deps.config ?? loadConfig(env);
-  const http = new Http(deps.fetchImpl);
+  const usage = new UsageTracker(usagePathFor(config.tokenStorePath), deps.now);
+  const http = new Http(deps.fetchImpl, usage);
   const limiter = new RateLimiter();
   const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter);
   const fleet = new FleetClient(config, http, tokens, limiter, deps.fleetOptions);
-  return { config, fleet, tokens, env };
+  return { config, fleet, tokens, env, usage };
 }
 
 export function createServer(ctx: ToolContext): Server {

@@ -5,6 +5,7 @@
  */
 import { fetch as undiciFetch, type Dispatcher } from "undici";
 import { mapFleetError } from "./errors.js";
+import type { UsageCategory, UsageTracker } from "./usage.js";
 import { USER_AGENT } from "./version.js";
 
 export type FetchLike = (url: string, init: Record<string, unknown>) => Promise<{
@@ -29,11 +30,18 @@ export type RequestOptions = {
 export type HttpResponse = { status: number; body: unknown; headers: Headers };
 
 export class Http {
-  /** Count of responses < 500 from billable Fleet API endpoints this session. */
+  /** Count of responses < 500 from Fleet API / proxy endpoints (every category except auth) this session. */
   billable = 0;
-  constructor(private readonly fetchImpl: FetchLike = defaultFetch) {}
+  constructor(
+    private readonly fetchImpl: FetchLike = defaultFetch,
+    private readonly usage?: UsageTracker,
+  ) {}
 
-  async request(opts: RequestOptions, billable = true): Promise<HttpResponse> {
+  /**
+   * One HTTP request. `category` is the Tesla pricing category used by the
+   * local usage counter (see usage.ts); every response is counted.
+   */
+  async request(opts: RequestOptions, category: UsageCategory): Promise<HttpResponse> {
     const headers: Record<string, string> = { "User-Agent": USER_AGENT, Accept: "application/json" };
     let body: string | undefined;
     if (opts.form) {
@@ -44,13 +52,21 @@ export class Http {
       if (opts.json !== undefined) body = JSON.stringify(opts.json);
     }
     if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-    const res = await this.fetchImpl(opts.url, {
-      method: opts.method,
-      headers,
-      body,
-      dispatcher: opts.dispatcher,
-      signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
-    });
+    let res: Awaited<ReturnType<FetchLike>>;
+    try {
+      res = await this.fetchImpl(opts.url, {
+        method: opts.method,
+        headers,
+        body,
+        dispatcher: opts.dispatcher,
+        signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
+      });
+    } catch (e) {
+      await this.usage?.record(category, undefined);
+      throw e;
+    }
+    await this.usage?.record(category, res.status);
+    if (category !== "auth" && res.status < 500) this.billable++;
     const text = await res.text();
     let parsed: unknown = undefined;
     if (text) {
@@ -60,7 +76,6 @@ export class Http {
         parsed = { error: "non_json_response", error_description: text.slice(0, 200) };
       }
     }
-    if (billable && res.status < 500) this.billable++;
     if (res.status >= 400) throw mapFleetError(res.status, parsed, res.headers);
     return { status: res.status, body: parsed, headers: res.headers };
   }

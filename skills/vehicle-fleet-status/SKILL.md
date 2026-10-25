@@ -21,4 +21,5 @@ Read tools need no confirm and never wake the car.
 - Closure codes: `0` = closed; anything else = open.
 - `get_location` (only if enabled): coarse by default; the car shows a location-sharing indicator on each read; nothing is stored.
 - No VIN given: the tool uses `TESLA_DEFAULT_VIN` or the only car; with several cars, ask which one (last 4 of VIN or name).
+- "How much have I used / what will it cost?": call `get_api_usage` (no network, not billed). Say it is a **local estimate** of this server's calls only (not Home Assistant or other apps), give this month's billable counts and the after-discount estimate, mention the `other` bucket is not priced, and point to the developer portal billing page as the real number.
 - Energy products (Powerwall/solar) are not supported in v0.1.

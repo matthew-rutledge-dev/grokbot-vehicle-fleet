@@ -118,7 +118,7 @@ export class TokenManager {
             url: `${this.config.authBaseUrl}/oauth2/v3/token`,
             form: { grant_type: "refresh_token", client_id: clientId, refresh_token: used },
           },
-          false, // authentication endpoints are not billed
+          "auth", // authentication endpoints are not billed; counted for info only
         );
         tok = (res.body ?? {}) as TokenResponse;
       } catch (e) {

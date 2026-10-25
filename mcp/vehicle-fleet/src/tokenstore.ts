@@ -29,6 +29,59 @@ function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+/** Atomic JSON write: temp file + fsync + rename; file 0600, directory 0700. */
+export function atomicWriteJson(filePath: string, data: unknown): void {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const tmp = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  const payload = JSON.stringify(data, null, 2);
+  const fd = fs.openSync(tmp, "w", 0o600);
+  try {
+    fs.writeFileSync(fd, payload);
+    fs.fsyncSync(fd);
+  } finally {
+    fs.closeSync(fd);
+  }
+  fs.renameSync(tmp, filePath);
+  try {
+    fs.chmodSync(filePath, 0o600);
+  } catch {
+    /* best effort on Windows */
+  }
+}
+
+/** Run fn while holding an exclusive `<filePath>.lock` (stale locks are broken after 30 s). */
+export async function withFileLock<T>(filePath: string, fn: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
+  const lock = `${filePath}.lock`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+  const deadline = Date.now() + timeoutMs;
+  let fd: number | undefined;
+  while (fd === undefined) {
+    try {
+      fd = fs.openSync(lock, "wx", 0o600);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+      try {
+        const age = Date.now() - fs.statSync(lock).mtimeMs;
+        if (age > LOCK_STALE_MS) {
+          fs.rmSync(lock, { force: true });
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (Date.now() > deadline) throw new Error(`timed out waiting for the lock on ${path.basename(filePath)}`);
+      await sleep(50);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
+}
+
 export class TokenStore {
   constructor(readonly filePath: string) {}
 
@@ -46,54 +99,11 @@ export class TokenStore {
   }
 
   write(data: StoredTokens): void {
-    const dir = path.dirname(this.filePath);
-    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-    const tmp = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
-    const payload = JSON.stringify({ ...data, version: 1, updated_at: new Date().toISOString() }, null, 2);
-    const fd = fs.openSync(tmp, "w", 0o600);
-    try {
-      fs.writeFileSync(fd, payload);
-      fs.fsyncSync(fd);
-    } finally {
-      fs.closeSync(fd);
-    }
-    fs.renameSync(tmp, this.filePath);
-    try {
-      fs.chmodSync(this.filePath, 0o600);
-    } catch {
-      /* best effort on Windows */
-    }
+    atomicWriteJson(this.filePath, { ...data, version: 1, updated_at: new Date().toISOString() });
   }
 
   /** Run fn while holding an exclusive lock file next to the store. */
-  async withLock<T>(fn: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
-    const lock = `${this.filePath}.lock`;
-    fs.mkdirSync(path.dirname(this.filePath), { recursive: true, mode: 0o700 });
-    const deadline = Date.now() + timeoutMs;
-    let fd: number | undefined;
-    while (fd === undefined) {
-      try {
-        fd = fs.openSync(lock, "wx", 0o600);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-        try {
-          const age = Date.now() - fs.statSync(lock).mtimeMs;
-          if (age > LOCK_STALE_MS) {
-            fs.rmSync(lock, { force: true });
-            continue;
-          }
-        } catch {
-          continue;
-        }
-        if (Date.now() > deadline) throw new Error("timed out waiting for the token store lock");
-        await sleep(50);
-      }
-    }
-    try {
-      return await fn();
-    } finally {
-      fs.closeSync(fd);
-      fs.rmSync(lock, { force: true });
-    }
+  withLock<T>(fn: () => Promise<T>, timeoutMs = 10_000): Promise<T> {
+    return withFileLock(this.filePath, fn, timeoutMs);
   }
 }

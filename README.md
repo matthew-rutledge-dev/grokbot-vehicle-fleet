@@ -72,6 +72,10 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_ENABLE_LOCATION` | no | `1`/`true`/`yes`/`on` lists `get_location` |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
 | `TESLA_FLEET_KEY_DOMAIN` | no | Your key domain, used only to show the pairing link |
+| `TESLA_FLEET_RATE_DATA_PER_USD` | no | Usage estimate only: data calls per USD (default `500`) |
+| `TESLA_FLEET_RATE_COMMANDS_PER_USD` | no | Usage estimate only: commands per USD (default `1000`) |
+| `TESLA_FLEET_RATE_WAKES_PER_USD` | no | Usage estimate only: wakes per USD (default `50`) |
+| `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
 
 Unset variables that a host passes through literally (`${VAR}`) and empty values are treated as unset. `TESLA_FLEET_AUTH_BASE_URL` exists for local testing only (default `https://fleet-auth.prd.vn.cloud.tesla.com`). Plain `http://` URLs are accepted only for loopback hosts.
 
@@ -88,7 +92,9 @@ In read-only mode command tools are absent from `tools/list` and refused if call
 
 ## Tools
 
-Read (no confirm; never wake the vehicle): `describe_boundary`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (only with `TESLA_FLEET_ENABLE_LOCATION`; coarse ~1 km unless `precision=precise`).
+Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (only with `TESLA_FLEET_ENABLE_LOCATION`; coarse ~1 km unless `precision=precise`).
+
+Tool counts: **11** in the default read-only mode, **22** with `TESLA_FLEET_READ_ONLY` off (11 read + 11 commands), plus `get_location` when location is enabled.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -105,6 +111,16 @@ Every command:
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
 Out of scope for v0.1 (TODO in `BACKLOG.md`): energy products (Powerwall/solar), Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, horn/lights, media, software updates.
+
+## Usage counter (local estimate)
+
+`get_api_usage` (a read tool, always listed, no network call) reports this and last month's Fleet API calls **made by this server**, and an estimated cost.
+
+- Every HTTP response from the Fleet API and from your command proxy is counted, by pricing category: `data` (vehicle_data, vehicle_data_cached, location), `command` (via your proxy), `wake` (wake_up). Calls whose pricing category is not documented here (vehicle list and state, `fleet_status`, region lookup, `/status`) go into a separate `other` bucket that is **not** priced in the estimate; a "what if billed as data" figure is shown next to it. Token refreshes are counted as `auth` for information only (authentication is not billed).
+- Tesla's rule: responses below HTTP 500 are billable, 500 and above are not. Both are counted (`billable` / `notBilled`, plus `noResponse` for network errors and timeouts); only `billable` goes into the estimate.
+- Months are UTC calendar months (Tesla bills from the 1st). The estimate uses Tesla's published rates (data 500 calls per $1, commands 1,000 per $1, wakes 50 per $1) and shows the total before and after the $10 monthly discount. Override the rates with the `TESLA_FLEET_RATE_*` / `TESLA_FLEET_MONTHLY_DISCOUNT_USD` variables if Tesla changes them.
+- **It is an estimate.** It does not see calls from Home Assistant, other apps, or other machines using the same developer app. The billing and usage page of your app on the developer portal is the source of truth; set a billing limit there.
+- Stored as totals only in `usage.json` next to the token store (same directory, atomic write under a lock, mode `0600`): no VINs, tokens, URLs or vehicle data. The last 13 months are kept. Delete the file to reset.
 
 ## Token storage
 
@@ -126,7 +142,7 @@ No other endpoints, no telemetry, no analytics.
 
 ## Privacy
 
-- The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only file it writes is the token store.
+- The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only files it writes are the token store and the usage counter (`usage.json`, totals only).
 - Location is off unless you opt in, coarse by default, never written to disk. The vehicle shows a location-sharing indicator when location is read.
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.

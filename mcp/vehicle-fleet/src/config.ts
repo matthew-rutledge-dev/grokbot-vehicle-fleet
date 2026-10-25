@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { readEnv, readOptInFlag, type Env } from "./env.js";
 import { resolveReadOnly, READ_ONLY_ENV, type ReadOnlyResolution } from "./readonly.js";
+import { DEFAULT_RATES, type Rates } from "./usage.js";
 
 /** Documented regional Fleet API base URLs (developer.tesla.com, Regions and Countries). */
 export const REGION_BASE_URLS: Record<string, string> = {
@@ -30,6 +31,10 @@ export const ENV = {
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
   DEFAULT_VIN: "TESLA_DEFAULT_VIN",
   KEY_DOMAIN: "TESLA_FLEET_KEY_DOMAIN",
+  RATE_DATA: "TESLA_FLEET_RATE_DATA_PER_USD",
+  RATE_COMMANDS: "TESLA_FLEET_RATE_COMMANDS_PER_USD",
+  RATE_WAKES: "TESLA_FLEET_RATE_WAKES_PER_USD",
+  MONTHLY_DISCOUNT: "TESLA_FLEET_MONTHLY_DISCOUNT_USD",
 } as const;
 
 export type Config = {
@@ -45,6 +50,8 @@ export type Config = {
   locationEnabled: boolean;
   defaultVin?: string;
   keyDomain?: string;
+  /** Rates for the local usage estimate (get_api_usage). */
+  rates: Rates;
   /** Config problems found at start (no secret values). */
   problems: string[];
   /** Non-fatal warnings for stderr (no secret values). */
@@ -81,6 +88,27 @@ export function defaultTokenStorePath(env: Env = process.env): string {
   }
   const xdg = readEnv("XDG_STATE_HOME", env) ?? path.join(os.homedir(), ".local", "state");
   return path.join(xdg, "grokbot-vehicle-fleet", "tokens.json");
+}
+
+/** Positive number (or >= 0 when allowZero) from env; otherwise the default plus a warning. */
+function readNumber(name: string, fallback: number, env: Env, warnings: string[], allowZero = false): number {
+  const raw = readEnv(name, env);
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || (!allowZero && n === 0)) {
+    warnings.push(`${name} must be a ${allowZero ? "non-negative" : "positive"} number; using the default ${fallback}.`);
+    return fallback;
+  }
+  return n;
+}
+
+export function loadRates(env: Env, warnings: string[]): Rates {
+  return {
+    dataPerUsd: readNumber(ENV.RATE_DATA, DEFAULT_RATES.dataPerUsd, env, warnings),
+    commandsPerUsd: readNumber(ENV.RATE_COMMANDS, DEFAULT_RATES.commandsPerUsd, env, warnings),
+    wakesPerUsd: readNumber(ENV.RATE_WAKES, DEFAULT_RATES.wakesPerUsd, env, warnings),
+    monthlyDiscountUsd: readNumber(ENV.MONTHLY_DISCOUNT, DEFAULT_RATES.monthlyDiscountUsd, env, warnings, true),
+  };
 }
 
 export function loadConfig(env: Env = process.env): Config {
@@ -124,6 +152,8 @@ export function loadConfig(env: Env = process.env): Config {
     proxyUrl = c.url;
   }
 
+  const rates = Object.freeze(loadRates(env, warnings));
+
   const clientId = readEnv(ENV.CLIENT_ID, env);
   if (!clientId) problems.push(`${ENV.CLIENT_ID} is not set`);
 
@@ -140,6 +170,7 @@ export function loadConfig(env: Env = process.env): Config {
     locationEnabled: readOptInFlag(ENV.ENABLE_LOCATION, env),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
+    rates,
     problems,
     warnings,
   });

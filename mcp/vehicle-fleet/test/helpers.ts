@@ -12,7 +12,7 @@ import { buildContext, createServer } from "../src/server.js";
 import type { ToolContext } from "../src/context.js";
 
 export const READ_TOOLS = [
-  "describe_boundary", "api_status", "list_vehicles", "get_vehicle_state", "get_fleet_status",
+  "describe_boundary", "get_api_usage", "api_status", "list_vehicles", "get_vehicle_state", "get_fleet_status",
   "get_battery_charge", "get_climate", "get_closures", "get_tires", "get_vehicle_snapshot",
 ];
 export const COMMANDS = [

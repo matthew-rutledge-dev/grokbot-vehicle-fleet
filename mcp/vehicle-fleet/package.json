@@ -11,7 +11,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.test.json",
     "pretest": "npm run build",
-    "test": "node --import tsx --test test/readonly.test.ts test/config.test.ts test/tools.test.ts test/tokenstore.test.ts test/auth.test.ts test/ratelimit.test.ts test/errors.test.ts test/reads.test.ts test/commands.test.ts test/stdio.test.ts"
+    "test": "node --import tsx --test test/readonly.test.ts test/config.test.ts test/tools.test.ts test/tokenstore.test.ts test/auth.test.ts test/ratelimit.test.ts test/errors.test.ts test/reads.test.ts test/commands.test.ts test/usage.test.ts test/stdio.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
