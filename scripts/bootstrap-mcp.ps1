@@ -39,10 +39,10 @@ if (-not (Test-Path -LiteralPath $pkgJson)) {
   Write-Error "bootstrap-mcp: missing $pkgJson"
   exit 1
 }
-Write-Host "bootstrap-mcp: npm ci in mcp/$pkg"
+Write-Host "bootstrap-mcp: npm ci --ignore-scripts in mcp/$pkg"
 Push-Location -LiteralPath $dir
 try {
-  & $npmExe ci
+  & $npmExe ci --ignore-scripts
   if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
   }

@@ -24,7 +24,7 @@ It is **read-only by default**, reads **cached data first**, and **never wakes t
 | `.cursor-plugin/plugin.json` + `mcp.json` | Cursor manifest + MCP config (`${CURSOR_PLUGIN_ROOT}`) |
 | `mcp/vehicle-fleet/` | TypeScript stdio server (`src/`), tests (`test/`) |
 | `skills/` | Skill folders with `SKILL.md` |
-| `scripts/bootstrap-mcp.sh` / `.ps1` | Required after clone: `npm ci` + `npm run build` |
+| `scripts/bootstrap-mcp.sh` / `.ps1` | Required after clone: `npm ci --ignore-scripts` + `npm run build` |
 | `scripts/auth-helper.mjs` | Optional first-token helper |
 | `assets/logo.svg` | Logo (original artwork) |
 
@@ -156,12 +156,12 @@ No other endpoints, no telemetry, no analytics.
 
 ```bash
 cd mcp/vehicle-fleet
-npm ci
+npm ci --ignore-scripts
 npm run typecheck
 npm test     # builds, then unit tests + MCP stdio smoke against local fakes (no real API calls)
 ```
 
-CI runs the same on ubuntu-latest and windows-latest (Node 20), with no secrets.
+CI runs the same on ubuntu-latest and windows-latest (Node 22 and 24), with no secrets. Requires Node 22 or newer.
 
 ## Security
 
