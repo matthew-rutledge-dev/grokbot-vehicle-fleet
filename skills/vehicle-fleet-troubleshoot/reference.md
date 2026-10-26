@@ -2,13 +2,13 @@
 
 | HTTP / local | code | Billed | Meaning | Action |
 |---|---|---|---|---|
-| local | `not_configured` | no | `TESLA_CLIENT_ID` missing | set plugin variable |
+| local | `not_configured` | no | `TESLA_CLIENT_ID` (alias `TESLA_FLEET_CLIENT_ID`) missing | set plugin variable; check the env loader ran under `pwsh` 7 |
 | local | `no_refresh_token` | no | no seed and empty store | auth-helper or `TESLA_REFRESH_TOKEN` |
 | local | `user_request_required` | no | confirm without a quoted human request | ask the user; never from routines |
 | local | `vehicle_not_online` | no* | state is asleep/offline | no auto-wake; offer `wake_vehicle` |
 | local | `vin_required` / `vin_ambiguous` | no | unlock/trunk need explicit vin; several cars | ask which car |
 | local | `rate_limited_locally` | no | local bucket empty | wait `retryAfterSec` |
-| local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` | configure proxy |
+| local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` (alias `TESLA_FLEET_PROXY_URL`) | configure proxy |
 | 401 | `unauthorized` | yes | access token expired | refreshed once automatically |
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |
 | 401 | `mobile_access_disabled` | yes | remote access off in the car | enable in car |
@@ -27,3 +27,8 @@
 \* the state check itself is one small read.
 
 Server will not start: run `scripts/bootstrap-mcp.sh` (builds `dist/index.js`), check Node 22+, then reload MCP servers.
+
+## Environment notes
+
+- `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET` and `TESLA_FLEET_PROXY_URL` are accepted as aliases for `TESLA_CLIENT_ID`, `TESLA_CLIENT_SECRET` and `TESLA_COMMAND_PROXY_URL`. The primary name wins when both are set. `describe_boundary` shows set/missing for each.
+- A PowerShell env loader should run under PowerShell 7 (`pwsh`); under Windows PowerShell 5.1 some loaders hang, leaving the variables unset.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.2 (unreleased)
+
+Fixes from the first read-only live test.
+
+- VIN resolution reuses the vehicle list for 5 minutes instead of listing vehicles again on every read (saves one billable call per tool call when no default VIN is set). `list_vehicles` still fetches a fresh list.
+- `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET` and `TESLA_FLEET_PROXY_URL` are accepted as aliases (server and auth helper); the primary `TESLA_*` name wins. Both MCP configs pass the aliases through.
+- `api_status` returns Tesla's plain-text status body (`ok`) instead of a `non_json_response` error object. Plain-text success bodies are kept as text; error bodies keep the structured shape.
+- `get_closures` reports `windowsOpen` as unknown when the data source has no window fields (cached data often omits them) instead of an empty object.
+- Docs: PowerShell env loaders should run under PowerShell 7 (`pwsh`).
+
 ## 0.1.1 (unreleased)
 
 Review fixes.

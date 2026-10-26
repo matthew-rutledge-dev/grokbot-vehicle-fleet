@@ -1,5 +1,5 @@
 /** Plugin / server version. Bump with the manifests. */
-export const VERSION = "0.1.1";
+export const VERSION = "0.1.2";
 
 /** Single MCP server name. */
 export const SERVER_NAME = "vehicle-fleet";

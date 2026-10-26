@@ -47,11 +47,13 @@ const BAR_TO_PSI = 14.5038;
 /** Closure codes: 0 = closed, anything else = open/ajar. */
 export function closureSummary(f: Record<string, unknown>): Record<string, unknown> {
   const open = (k: string) => (typeof f[k] === "number" ? (f[k] as number) !== 0 : undefined);
+  const windows = { driverFront: open("fd_window"), passengerFront: open("fp_window"), driverRear: open("rd_window"), passengerRear: open("rp_window") };
+  const windowsKnown = Object.values(windows).some((v) => v !== undefined);
   return {
     locked: f.locked,
     doorsOpen: { driverFront: open("df"), driverRear: open("dr"), passengerFront: open("pf"), passengerRear: open("pr") },
     trunksOpen: { front: open("ft"), rear: open("rt") },
-    windowsOpen: { driverFront: open("fd_window"), passengerFront: open("fp_window"), driverRear: open("rd_window"), passengerRear: open("rp_window") },
+    windowsOpen: windowsKnown ? windows : "unknown (not reported in this data; try live=true when online)",
     sentryMode: f.sentry_mode,
   };
 }

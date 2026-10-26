@@ -36,7 +36,7 @@ test("defaults: read-only, location off, missing client id reported", () => {
   const c = loadConfig({});
   assert.equal(c.readOnly.readOnly, true);
   assert.equal(c.locationEnabled, false);
-  assert.ok(c.problems.includes("TESLA_CLIENT_ID is not set"));
+  assert.ok(c.problems.includes("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set"));
 });
 
 test("token store default honours GROK_PLUGIN_DATA then XDG", () => {
@@ -51,4 +51,19 @@ test("configPresence reports set/missing only", () => {
   assert.equal(p.TESLA_CLIENT_ID, "set");
   assert.equal(p.TESLA_REFRESH_TOKEN, "missing");
   assert.ok(!JSON.stringify(p).includes("secret-ish-value"));
+});
+
+test("TESLA_FLEET_CLIENT_ID / TESLA_FLEET_PROXY_URL are aliases; the primary name wins", () => {
+  const a = loadConfig({ TESLA_FLEET_CLIENT_ID: "alias-id", TESLA_FLEET_PROXY_URL: "https://proxy.example.com" });
+  assert.equal(a.clientId, "alias-id");
+  assert.equal(a.proxyUrl, "https://proxy.example.com");
+  assert.equal(a.problems.length, 0);
+  const b = loadConfig({
+    TESLA_CLIENT_ID: "primary-id", TESLA_FLEET_CLIENT_ID: "alias-id",
+    TESLA_COMMAND_PROXY_URL: "https://primary.example.com", TESLA_FLEET_PROXY_URL: "https://proxy.example.com",
+  });
+  assert.equal(b.clientId, "primary-id");
+  assert.equal(b.proxyUrl, "https://primary.example.com");
+  const c = loadConfig({ TESLA_CLIENT_ID: "${TESLA_CLIENT_ID}", TESLA_FLEET_CLIENT_ID: "alias-id" });
+  assert.equal(c.clientId, "alias-id", "an unexpanded placeholder counts as unset, so the alias is used");
 });

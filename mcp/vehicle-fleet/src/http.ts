@@ -73,7 +73,8 @@ export class Http {
       try {
         parsed = JSON.parse(text);
       } catch {
-        parsed = { error: "non_json_response", error_description: text.slice(0, 200) };
+        // Plain-text success bodies (e.g. GET /status -> "ok") stay text; errors get a structured shape.
+        parsed = res.status < 400 ? text.slice(0, 200) : { error: "non_json_response", error_description: text.slice(0, 200) };
       }
     }
     if (res.status >= 400) throw mapFleetError(res.status, parsed, res.headers);
