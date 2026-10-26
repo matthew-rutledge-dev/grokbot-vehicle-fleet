@@ -7,7 +7,7 @@
  */
 import { FleetApiError, LocalRefusal } from "../errors.js";
 import type { ToolArgs, ToolContext } from "../context.js";
-import { bad, bool, connectFailure, int, requireIntent, scopeHint } from "./commands.js";
+import { bad, bool, classifySendFailure, int, requireIntent, scopeHint } from "./commands.js";
 import { SITE_PROP } from "./energy.js";
 import { CONFIRM_PROPS } from "./schema.js";
 import type { ToolDef } from "./types.js";
@@ -123,15 +123,14 @@ function energyTool(spec: EnergySpec): ToolDef {
         }
         return { ok: true, sent: true, command: spec.name, result: { code, message: r.message }, readBackWith: "get_energy_site_info" };
       } catch (e) {
-        const n = (e as { name?: string })?.name;
-        if (n === "TimeoutError" || n === "AbortError" || (e instanceof FleetApiError && e.info.status === 408)) {
-          return { ok: false, sent: "unknown", command: spec.name, code: "state_unknown", message: "The change may or may not have applied (timeout). It was not retried.", hint: "Read it back with get_energy_site_info." };
-        }
-        const cf = connectFailure(e);
-        if (cf) return { ok: false, sent: false, command: spec.name, code: "fleet_api_unreachable", error: cf.message.replace("the command proxy", "the Fleet API") };
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });
         }
+        const f = classifySendFailure(e);
+        if (f?.kind === "unknown") {
+          return { ok: false, sent: "unknown", command: spec.name, code: "state_unknown", cause: f.detail, message: `The change may or may not have applied (${f.detail}). It was not retried; do not resend blindly.`, hint: "Read it back with get_energy_site_info." };
+        }
+        if (f?.kind === "not_sent") return { ok: false, sent: false, command: spec.name, code: "fleet_api_unreachable", error: f.message.replace("the command proxy", "the Fleet API").replace(" Check TESLA_COMMAND_PROXY_CA_CERT and the certificate's host name.", "") };
         throw e;
       }
     },

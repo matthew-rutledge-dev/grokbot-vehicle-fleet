@@ -101,3 +101,19 @@ test("energy dry-run mode returns the exact request; missing scope names energy_
     assert.ok(!JSON.stringify(b).includes(SEED));
   }
 });
+
+test("energy commands: 5xx or reset mid-request = state_unknown; refused connection = not sent", async () => {
+  const cases: Array<[Route, string, unknown]> = [
+    [() => ({ status: 502, body: {} }), "state_unknown", "unknown"],
+    [() => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_SOCKET" } }); }, "state_unknown", "unknown"],
+    [() => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); }, "fleet_api_unreachable", false],
+  ];
+  for (const [route, code, sent] of cases) {
+    const { ctx, calls } = setup(baseEnv(ON), routesFor(["backup"], route));
+    const c = await connect(ctx);
+    const b = body(await c.callTool({ name: "set_backup_reserve", arguments: { backup_reserve_percent: 15, ...intent } }));
+    assert.equal(b.code, code);
+    assert.equal(b.sent, sent);
+    assert.equal(energyCalls(calls).length, 1, "not retried");
+  }
+});

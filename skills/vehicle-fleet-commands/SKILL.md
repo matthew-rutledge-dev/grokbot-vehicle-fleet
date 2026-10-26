@@ -12,7 +12,7 @@ Only when command tools are listed (read-only explicitly off) and the user asked
 1. Call the tool **without** `confirm` -> dry-run preview (nothing sent).
 2. Tell the user exactly what will happen (command, car by name/last 4 of VIN or the energy site by name, value) and ask for a yes.
 3. On an explicit yes: call again with `confirm=true` and `user_request` = a short quote of their request.
-4. Report the result. On `state_unknown` (timeout/408), do **not** resend: read back with the tool named in `readBackWith`/`hint`.
+4. Report the result. On `state_unknown` (timeout, 408, 5xx, connection reset mid-request), do **not** resend: read back with the tool named in `readBackWith`/`hint`. On `sent: "partial"` (warm-up), say which steps ran (`completedSteps`) and which failed.
 
 If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSend` and nothing is sent; say so.
 

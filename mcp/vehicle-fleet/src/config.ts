@@ -4,7 +4,7 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { readEnv, readOptInFlag, type Env } from "./env.js";
+import { OFF_VALUES, ON_VALUES, readEnv, readOptInFlag, type Env } from "./env.js";
 import { resolveReadOnly, READ_ONLY_ENV, type ReadOnlyResolution } from "./readonly.js";
 import { DEFAULT_RATES, type Rates } from "./usage.js";
 
@@ -64,6 +64,17 @@ export type ClimateDefaults = {
 export const DEFAULT_CLIMATE: ClimateDefaults = Object.freeze({
   tempC: 21, seatLevel: 2, seats: "driver", coldBelowC: 5, defrostBelowC: -2, wheelWhenCold: true,
 });
+
+/** TESLA_FLEET_DRY_RUN fails closed: unset/off values = off, on values = on, anything else = on + warning. */
+function resolveDryRun(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.DRY_RUN, env);
+  if (v === undefined) return false;
+  const l = v.toLowerCase();
+  if (OFF_VALUES.includes(l)) return false;
+  if (ON_VALUES.includes(l)) return true;
+  warnings.push(`${ENV.DRY_RUN} has an unrecognised value; dry-run mode is ON (nothing will be sent). Use 1/true/on or 0/false/off.`);
+  return true;
+}
 
 function loadClimate(env: Env, warnings: string[]): ClimateDefaults {
   const n = (name: string, fallback: number, min: number, max: number, int = false): number => {
@@ -239,7 +250,7 @@ export function loadConfig(env: Env = process.env): Config {
     locationEnabled: readOptInFlag(ENV.ENABLE_LOCATION, env),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
     defaultEnergySiteId: readEnv(ENV.DEFAULT_ENERGY_SITE, env),
-    dryRun: readOptInFlag(ENV.DRY_RUN, env),
+    dryRun: resolveDryRun(env, warnings),
     climate: loadClimate(env, warnings),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
     rates,

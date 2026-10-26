@@ -103,7 +103,8 @@ test("TESLA_FLEET_DRY_RUN: confirmed command returns the exact request, zero net
   const b = body(await c.callTool({ name: "set_charging_amps", arguments: { charging_amps: 16, ...intent } }));
   assert.equal(b.dryRunMode, "TESLA_FLEET_DRY_RUN");
   assert.equal(b.sent, false);
-  assert.deepEqual(b.wouldSend, [{ method: "POST", url: `${PROXY}/api/1/vehicles/${VIN}/command/set_charging_amps`, body: { charging_amps: 16 } }]);
+  assert.deepEqual(b.wouldSend, [{ method: "POST", url: `${PROXY}/api/1/vehicles/***${VIN.slice(-4)}/command/set_charging_amps`, body: { charging_amps: 16 } }]);
+  assert.ok(!JSON.stringify(b).includes(VIN), "full VIN masked in dry-run output");
   const w = body(await c.callTool({ name: "wake_vehicle", arguments: intent }));
   assert.equal(w.dryRunMode, "TESLA_FLEET_DRY_RUN");
   const needsIntent = body(await c.callTool({ name: "flash_lights", arguments: { confirm: true } }));
@@ -170,6 +171,8 @@ test("climate_warm_up: a mid-sequence rejection stops and reports completed step
   assert.equal(b.ok, false);
   assert.equal(b.failedStep, "set_temps");
   assert.deepEqual((b.completedSteps as Array<{ endpoint: string }>).map((s) => s.endpoint), ["auto_conditioning_start"]);
+  assert.equal(b.sent, "partial");
+  assert.equal(b.failedStepSent, true);
   assert.equal(cmdCalls(calls).length, 2);
 });
 
@@ -209,4 +212,91 @@ test("no token or secret leaks in command output", async () => {
   assert.equal(isError(res), true);
   assert.ok(!text.includes(SEED));
   assert.ok(!/access-EXAMPLE-\d/.test(text), "access token redacted");
+});
+
+test("dry-run output masks the VIN and never echoes a navigation destination", async () => {
+  const { ctx, calls } = setup(baseEnv({ ...ON, TESLA_FLEET_DRY_RUN: "1" }));
+  const c = await connect(ctx);
+  const nav = body(await c.callTool({ name: "share_navigation", arguments: { destination: "1 Example Street, Example City", ...intent } }));
+  const text = JSON.stringify(nav);
+  assert.ok(!text.includes("Example Street"), "destination not echoed");
+  assert.ok(!text.includes(VIN));
+  assert.match(text, /\*\*\*MPLE/);
+  const gps = JSON.stringify(body(await c.callTool({ name: "share_navigation", arguments: { lat: 37.1234, lon: -122.5678, ...intent } })));
+  assert.ok(!gps.includes("37.1234") && !gps.includes("122.5678"), "coordinates not echoed");
+  const warm = JSON.stringify(body(await c.callTool({ name: "climate_warm_up", arguments: intent })));
+  assert.ok(!warm.includes(VIN));
+  assert.equal(calls.length, 0);
+});
+
+test("mid-request network errors and proxy 5xx = state_unknown, sent unknown, not retried", async () => {
+  const failures: Array<[string, Route]> = [
+    ["ECONNRESET", () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }); }],
+    ["UND_ERR_SOCKET", () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_SOCKET" } }); }],
+    ["no code", () => { throw new TypeError("fetch failed"); }],
+    ["500", () => ({ status: 500, body: { error: "internal" } })],
+    ["503", () => ({ status: 503, body: { error: "unavailable" } })],
+  ];
+  for (const [label, route] of failures) {
+    const { ctx, calls } = setup(baseEnv(ON), { [`POST ${PROXY}/api/1/vehicles/${VIN}/command/flash_lights`]: route });
+    const c = await connect(ctx);
+    const res = await c.callTool({ name: "flash_lights", arguments: intent });
+    const b = body(res);
+    assert.equal(b.code, "state_unknown", label);
+    assert.equal(b.sent, "unknown", label);
+    assert.doesNotMatch(String(b.hint), /try again|retry/i, label);
+    assert.equal(cmdCalls(calls).length, 1, `${label}: not retried`);
+  }
+});
+
+test("failure before the command request (token refresh) is not reported as maybe-sent", async () => {
+  let tokenCalls = 0;
+  const { ctx, calls } = setup(baseEnv(ON), {
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/flash_lights`]: () => ({ status: 401, body: {} }),
+    [`POST https://fleet-auth.example.test/oauth2/v3/token`]: () => {
+      tokenCalls++;
+      if (tokenCalls > 1) throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } });
+      return { status: 200, body: { access_token: "access-EXAMPLE-1", refresh_token: "rotated-EXAMPLE-1", expires_in: 28800 } };
+    },
+  });
+  const c = await connect(ctx);
+  const res = await c.callTool({ name: "flash_lights", arguments: intent });
+  assert.equal(isError(res), true);
+  assert.notEqual(body(res).code, "state_unknown");
+  assert.equal(cmdCalls(calls).length, 1);
+});
+
+test("climate_warm_up: unknown outcome mid-sequence = sent partial, failed step unknown", async () => {
+  const { ctx, calls } = setup(baseEnv(ON), {
+    ...cmdRoutes(["auto_conditioning_start"]),
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/set_temps`]: () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNRESET" } }); },
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "climate_warm_up", arguments: { ...intent, seat_heat: "off", defrost: false } }));
+  assert.equal(b.sent, "partial");
+  assert.equal(b.failedStepSent, "unknown");
+  assert.equal(b.code, "state_unknown");
+  assert.equal(b.failedStep, "set_temps");
+  assert.equal(cmdCalls(calls).length, 2);
+});
+
+test("climate_warm_up: proxy down on the first step = sent false (not partial)", async () => {
+  const { ctx } = setup(baseEnv(ON), {
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/auto_conditioning_start`]: () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } }); },
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "climate_warm_up", arguments: { ...intent, seat_heat: "off", defrost: false } }));
+  assert.equal(b.sent, false);
+  assert.equal(b.code, "proxy_unreachable");
+});
+
+test("proxy_not_configured hint names the variable and its alias", async () => {
+  const env = baseEnv(ON);
+  delete (env as Record<string, string | undefined>).TESLA_COMMAND_PROXY_URL;
+  const { ctx } = setup(env);
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "flash_lights", arguments: intent }));
+  assert.equal(b.code, "proxy_not_configured");
+  assert.match(String(b.hint), /TESLA_COMMAND_PROXY_URL/);
+  assert.match(String(b.hint), /TESLA_FLEET_PROXY_URL/);
 });

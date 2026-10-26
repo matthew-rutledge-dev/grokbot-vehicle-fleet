@@ -29,6 +29,12 @@ export type RequestOptions = {
 
 export type HttpResponse = { status: number; body: unknown; headers: Headers };
 
+/**
+ * Errors raised by a "command" category request (the command itself, not token refresh or
+ * pre-checks). Only these can mean "maybe sent"; see classifySendFailure.
+ */
+export const COMMAND_REQUEST_ERRORS = new WeakSet<object>();
+
 export class Http {
   /** Count of responses < 500 from Fleet API / proxy endpoints (every category except auth) this session. */
   billable = 0;
@@ -42,6 +48,15 @@ export class Http {
    * local usage counter (see usage.ts); every response is counted.
    */
   async request(opts: RequestOptions, category: UsageCategory): Promise<HttpResponse> {
+    try {
+      return await this.send(opts, category);
+    } catch (e) {
+      if (category === "command" && e && typeof e === "object") COMMAND_REQUEST_ERRORS.add(e);
+      throw e;
+    }
+  }
+
+  private async send(opts: RequestOptions, category: UsageCategory): Promise<HttpResponse> {
     const headers: Record<string, string> = { "User-Agent": USER_AGENT, Accept: "application/json" };
     let body: string | undefined;
     if (opts.form) {

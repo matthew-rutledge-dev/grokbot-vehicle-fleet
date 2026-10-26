@@ -72,8 +72,8 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_ENABLE_LOCATION` | no | `1`/`true`/`yes`/`on` lists `get_location` |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
 | `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads and commands (e.g. `1234567890`); otherwise the only site on the account |
-| `TESLA_FLEET_DRY_RUN` | no | `1`/`true`/`yes`/`on`: confirmed commands are validated and return the exact request; **nothing is sent** |
-| `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C` | no | `climate_warm_up` setpoint, 15-28 °C (default `21`) |
+| `TESLA_FLEET_DRY_RUN` | no | `1`/`true`/`yes`/`on`: confirmed commands are validated and return the exact request; **nothing is sent**. Unset or `0`/`false`/`no`/`off` = off; **any other value = on** (fails closed, one warning on stderr) |
+| `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C` | no | `climate_warm_up` setpoint, 15-28 °C (default `21`, which the car shows as 70 °F) |
 | `TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL` | no | Seat heat level 0-3 when cold (default `2`) |
 | `TESLA_FLEET_DEFAULT_HEATED_SEATS` | no | `driver` / `front` / `none` (default `driver`) |
 | `TESLA_FLEET_COLD_OUTSIDE_BELOW_C` | no | "Cold" threshold for seat and steering wheel heat, °C (default `5`) |
@@ -126,7 +126,7 @@ Vehicle commands (hidden unless read-only is explicitly off; signed by your prox
 
 Energy-site commands (same gates; sent directly to the Fleet API, scope `energy_cmds`): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`).
 
-**`climate_warm_up`** makes "turn on the heat" work with no arguments: climate on, then both setpoints to `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`. If the car's cached outside temperature is below the cold threshold it also turns on the default seat heater(s) and (optionally) the steering wheel heater, and below the defrost threshold it turns on max defrost. Override per call with `temp`/`unit`, `seat_heat` (`auto`, `off`, 0-3), `seats` and `defrost` (`auto`, `true`, `false`). Steps run in order and stop at the first rejection, reporting which steps completed.
+**`climate_warm_up`** makes "turn on the heat" work with no arguments: climate on, then both setpoints to `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`. If the car's cached outside temperature is below the cold threshold it also turns on the default seat heater(s) and (optionally) the steering wheel heater, and below the defrost threshold it turns on max defrost. Override per call with `temp`/`unit`, `seat_heat` (`auto`, `off`, 0-3), `seats` and `defrost` (`auto`, `true`, `false`). Steps run in order and stop at the first failure, reporting `completedSteps`, `failedStep` and `sent: "partial"` when some steps already ran (`failedStepSent` says whether the failed step itself was sent, not sent or unknown). The default 21 °C shows as 70 °F on a car set to Fahrenheit.
 
 ### Command safety model
 
@@ -134,8 +134,8 @@ Every command, vehicle or energy:
 - is **absent from `tools/list` and refused** unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed);
 - returns a **dry-run preview** (endpoint and body, zero network calls) unless called with `confirm=true` **and** `user_request` (a short quote of the human's request in the current conversation);
 - validates every parameter **before any network call**;
-- with `TESLA_FLEET_DRY_RUN=1`, goes through all of the above and returns the exact request (`wouldSend`) without sending anything; use this for a first run;
-- is never retried automatically; on a timeout or 408 the result says the state is unknown and which read to use.
+- with `TESLA_FLEET_DRY_RUN=1`, goes through all of the above and returns the exact request (`wouldSend`, VIN masked to the last 4, navigation destination not echoed) without sending anything; use this for a first run;
+- is never retried automatically. If the request may have reached the car or site (timeout, 408, any 5xx, or a connection reset after the request started) the result is `state_unknown` with `sent: "unknown"` and the read to use; failures before connecting (refused, DNS, TLS) are `sent: false`.
 
 Vehicle commands additionally:
 - go **only** through your proxy (`/api/1/vehicles/{VIN}/command/...`, HTTPS with optional CA pin; never directly to the Fleet API) with your bearer token;

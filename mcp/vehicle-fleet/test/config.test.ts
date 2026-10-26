@@ -85,3 +85,19 @@ test("dry-run flag and climate defaults: opt-in, validated, fall back with a war
   assert.equal(bad.climate.seats, "driver");
   assert.equal(bad.warnings.length, 3);
 });
+
+test("TESLA_FLEET_DRY_RUN fails closed: unknown values turn dry-run on with a warning", () => {
+  for (const v of ["", "0", "false", "off", "no", "OFF"]) {
+    const c = loadConfig({ TESLA_FLEET_DRY_RUN: v });
+    assert.equal(c.dryRun, false, JSON.stringify(v));
+    assert.ok(!c.warnings.some((w) => w.includes("TESLA_FLEET_DRY_RUN")));
+  }
+  for (const v of ["1", "true", "on", "YES"]) assert.equal(loadConfig({ TESLA_FLEET_DRY_RUN: v }).dryRun, true, v);
+  for (const v of ["maybe", "2", "enabled"]) {
+    const c = loadConfig({ TESLA_FLEET_DRY_RUN: v });
+    assert.equal(c.dryRun, true, v);
+    assert.equal(c.warnings.filter((w) => w.includes("TESLA_FLEET_DRY_RUN")).length, 1);
+    assert.ok(!c.warnings.join(" ").includes(v), "value not echoed");
+  }
+  assert.equal(loadConfig({}).dryRun, false);
+});

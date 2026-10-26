@@ -18,7 +18,7 @@ Read [reference.md](reference.md) for the full error table. Short version:
 | `proxy_unreachable` / `proxy_tls_error` | proxy down, wrong host, or cert/CA mismatch; **not sent** | operator checks the proxy and `TESLA_COMMAND_PROXY_CA_CERT` |
 | `missing_scope` / `missing_energy_cmds_scope` | token lacks a command scope | `hint` names the scope and flag (`--commands`, `--energy-commands`); operator re-consents |
 | `rate_limited` / `rate_limited_locally` | too many calls | wait `retryAfterSec` |
-| `state_unknown` | command timed out | read back state; do not resend |
+| `state_unknown` | command may have run (timeout, 408, 5xx, reset mid-request) | read back state; do not resend |
 | `payment_required` (402) / app disabled | billing limit reached or no payment method | `get_api_usage` for a local estimate; operator checks the developer portal billing page and limit |
 
 Cost worries or unexpected bills: `get_api_usage` counts only this server's calls. A much higher portal total means another client (for example Home Assistant) is using the same app.

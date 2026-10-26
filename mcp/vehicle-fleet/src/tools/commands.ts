@@ -9,6 +9,7 @@
  * proxy -> map result. No automatic retry; timeouts return "state unknown".
  */
 import { BENIGN_COMMAND_REASONS, FleetApiError, LocalRefusal } from "../errors.js";
+import { COMMAND_REQUEST_ERRORS } from "../http.js";
 import { maskVin } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import { CONFIRM_PROPS, VIN_PROP } from "./schema.js";
@@ -268,6 +269,30 @@ export function connectFailure(e: unknown): { code: string; message: string } | 
   return undefined;
 }
 
+/**
+ * What a failed send means. not_sent: the connection never opened (refused, DNS, TLS).
+ * unknown: the request may have reached the vehicle (timeout, 408, 5xx, reset mid-request,
+ * or any other network error after connect). undefined: rethrow (local refusals, 4xx).
+ */
+export function classifySendFailure(e: unknown):
+  | { kind: "not_sent"; code: string; message: string }
+  | { kind: "unknown"; detail: string }
+  | undefined {
+  if (e instanceof LocalRefusal) return undefined;
+  if (!e || typeof e !== "object" || !COMMAND_REQUEST_ERRORS.has(e)) return undefined; // failed before the command request
+  if (isTimeout(e)) return { kind: "unknown", detail: "timeout" };
+  if (e instanceof FleetApiError) {
+    const st = e.info.status ?? 0;
+    if (st === 408 || st >= 500) return { kind: "unknown", detail: `HTTP ${st}` };
+    return undefined;
+  }
+  const cf = connectFailure(e);
+  if (cf) return { kind: "not_sent", ...cf };
+  const cause = (e as { cause?: { code?: string } })?.cause;
+  const code = cause?.code ?? (e as { code?: string })?.code;
+  return { kind: "unknown", detail: code ? `network error ${code}` : "network error" };
+}
+
 /** Steps planned for the climate_warm_up preset (cold-dependent steps resolved at send time). */
 export type WarmUpPlan = { steps: Step[]; conditional: Array<Step & { when: string }> };
 
@@ -330,9 +355,11 @@ type SendOpts = {
   previewPlan: () => Built & { conditional?: Array<Step & { when: string }> };
 };
 
-function requestOf(ctx: ToolContext, vin: string | undefined, s: Step) {
+/** Dry-run request echo: VIN masked to the last 4, navigation destination not echoed. */
+function requestOf(ctx: ToolContext, vin: string | undefined, s: Step, preview?: Record<string, unknown>) {
   const base = ctx.config.proxyUrl ?? "<TESLA_COMMAND_PROXY_URL>";
-  return { method: "POST", url: `${base}/api/1/vehicles/${vin ?? "{vin}"}/command/${s.endpoint}`, body: s.body };
+  const body = preview?.destination ? { destination: preview.destination } : s.body;
+  return { method: "POST", url: `${base}/api/1/vehicles/${vin ? maskVin(vin) : "{vin}"}/command/${s.endpoint}`, body };
 }
 
 async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promise<Record<string, unknown>> {
@@ -361,7 +388,8 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
     if (o.requireExplicitVin && !vin) throw new LocalRefusal("vin_required", "This command needs an explicit vin (no default) because it can open the vehicle.");
     return {
       dryRun: true, dryRunMode: "TESLA_FLEET_DRY_RUN", sent: false, command: o.name,
-      wouldSend: p.steps.map((s) => requestOf(ctx, vin, s)),
+      wouldSend: p.steps.map((s) => requestOf(ctx, vin, s, p.preview)),
+      vinLast4: vin ? vin.slice(-4) : "(resolved at send time)",
       ...(p.conditional?.length ? { conditionalSteps: p.conditional.map((s) => ({ ...requestOf(ctx, vin, s), when: s.when })) } : {}),
       wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
       proxyConfigured: Boolean(ctx.config.proxyUrl),
@@ -371,7 +399,7 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
   const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: o.requireExplicitVin });
   if (!ctx.config.proxyUrl) {
     throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
-      "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
+      "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT for a private CA (skill vehicle-fleet-setup).");
   }
   await ctx.fleet.requireOnline(vin);
   const fs = await ctx.fleet.fleetStatus(vin);
@@ -387,22 +415,23 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
       const reason = r.reason ?? "";
       if (r.result === true) { done.push({ endpoint: s.endpoint, ok: true }); continue; }
       if (BENIGN_COMMAND_REASONS[reason]) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, message: BENIGN_COMMAND_REASONS[reason] }); continue; }
-      const fail = { ok: false, sent: true, command: o.name, vinLast4: vin.slice(-4), reason, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
-      return multi ? { ...fail, failedStep: s.endpoint, completedSteps: done } : fail;
+      const fail = { ok: false, sent: true as boolean | "partial", command: o.name, vinLast4: vin.slice(-4), reason, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
+      return multi ? { ...fail, ...(done.length ? { sent: "partial", failedStepSent: true } : {}), failedStep: s.endpoint, completedSteps: done } : fail;
     } catch (e) {
       const partial = multi ? { failedStep: s.endpoint, completedSteps: done } : {};
-      if (isTimeout(e) || (e instanceof FleetApiError && e.info.status === 408)) {
+      const sentField = (failed: boolean | "unknown") => (done.length ? { sent: "partial", failedStepSent: failed } : { sent: failed });
+      if (e instanceof FleetApiError && e.info.code === "virtual_key_missing") throw new FleetApiError({ ...e.info, hint: pairingHint(ctx) });
+      if (e instanceof FleetApiError && e.info.code === "missing_scope") throw new FleetApiError({ ...e.info, hint: scopeHint(o.scope) });
+      const f = classifySendFailure(e);
+      if (f?.kind === "unknown") {
         return {
-          ok: false, sent: "unknown", command: o.name, vinLast4: maskVin(vin).slice(-4), code: "state_unknown",
-          message: "The command may or may not have run (timeout/unavailable). It was not retried.",
+          ok: false, ...sentField("unknown"), command: o.name, vinLast4: vin.slice(-4), code: "state_unknown", cause: f.detail,
+          message: `The command may or may not have run (${f.detail}). It was not retried; do not resend blindly.`,
           hint: `Read the state back with ${o.readBack} before doing anything else.`, ...partial,
         };
       }
-      const cf = connectFailure(e);
-      if (cf) return { ok: false, sent: false, command: o.name, code: cf.code, error: cf.message, ...partial };
-      if (e instanceof FleetApiError && e.info.code === "virtual_key_missing") throw new FleetApiError({ ...e.info, hint: pairingHint(ctx) });
-      if (e instanceof FleetApiError && e.info.code === "missing_scope") throw new FleetApiError({ ...e.info, hint: scopeHint(o.scope) });
-      if (multi && done.length) return { ok: false, sent: true, command: o.name, error: e instanceof Error ? e.message : String(e), ...partial };
+      if (f?.kind === "not_sent") return { ok: false, ...sentField(false), command: o.name, code: f.code, error: f.message, ...partial };
+      if (done.length) return { ok: false, ...sentField(false), command: o.name, error: e instanceof Error ? e.message : String(e), ...partial };
       throw e;
     }
   }
