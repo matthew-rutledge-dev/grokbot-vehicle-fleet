@@ -322,7 +322,7 @@ export class FleetClient {
   /** Signed command through the installer's tesla-http-proxy. */
   async command(vin: string, name: string, body: Record<string, unknown>): Promise<{ result?: boolean; reason?: string }> {
     if (!this.config.proxyUrl) {
-      throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL is not set; nothing was sent.",
+      throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
         "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
     }
     this.limiter.take("command", vin);

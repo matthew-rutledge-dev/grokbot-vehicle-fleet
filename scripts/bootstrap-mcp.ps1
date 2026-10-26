@@ -29,6 +29,17 @@ if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
   exit 1
 }
 
+# Warn (do not fail) below the engines minimum.
+$minNode = [version]'22.19.0'
+try {
+  $nodeVer = [version]((& node -p 'process.versions.node').Trim())
+  if ($nodeVer -lt $minNode) {
+    Write-Warning "bootstrap-mcp: Node $nodeVer is older than the required $minNode; install a current Node 22 or 24 LTS"
+  }
+} catch {
+  Write-Warning 'bootstrap-mcp: could not read the Node version'
+}
+
 $npmExe = Resolve-Npm
 Write-Host "bootstrap-mcp: using $npmExe"
 

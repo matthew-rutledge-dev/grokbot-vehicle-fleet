@@ -193,7 +193,7 @@ function commandTool(spec: CommandSpec): ToolDef {
       requireIntent(args);
       const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: spec.requireExplicitVin });
       if (!ctx.config.proxyUrl) {
-        throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL is not set; nothing was sent.",
+        throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
           "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
       }
       await ctx.fleet.requireOnline(vin);

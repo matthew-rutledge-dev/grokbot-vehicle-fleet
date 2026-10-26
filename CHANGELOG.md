@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 (unreleased)
+
+- CI also runs on Node 22.19.0 (the exact `engines` minimum) next to latest 22 and 24, on ubuntu and windows.
+- Bootstrap scripts warn (without failing) when Node is older than 22.19.
+- `not_configured` and `proxy_not_configured` messages mention the `TESLA_FLEET_*` aliases.
+- README: why `@types/node` stays at latest.
+
 ## 0.2.1 (unreleased)
 
 Dependency updates.
