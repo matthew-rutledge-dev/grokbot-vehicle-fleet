@@ -8,3 +8,4 @@ tokens*.json
 *.lock
 auth-state.json
 *.pem
+usage*.json

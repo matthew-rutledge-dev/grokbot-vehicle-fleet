@@ -1,0 +1,51 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  mcp:
+    name: mcp (${{ matrix.os }}, node 20)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: mcp/vehicle-fleet
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mcp/vehicle-fleet/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - name: no secrets or token stores tracked
+        shell: bash
+        working-directory: .
+        run: |
+          if git ls-files | grep -E '(^|/)(tokens[^/]*\.json|\.env(\..*)?|auth-state\.json|[^/]*\.pem)$'; then
+            echo "secret-looking file tracked"; exit 1
+          fi
+      - name: manifests are valid JSON and agree on version
+        shell: bash
+        working-directory: .
+        run: |
+          node -e '
+            const fs=require("fs");
+            const files=["plugin.json",".grok-plugin/plugin.json",".cursor-plugin/plugin.json",".mcp.json","mcp.json","mcp/vehicle-fleet/package.json"];
+            const v=new Set(files.map(f=>JSON.parse(fs.readFileSync(f,"utf8")).version).filter(Boolean));
+            if(v.size!==1){console.error("version mismatch",[...v]);process.exit(1)}
+            const src=fs.readFileSync("mcp/vehicle-fleet/src/version.ts","utf8");
+            if(!src.includes(`"${[...v][0]}"`)){console.error("version.ts mismatch");process.exit(1)}
+          '
