@@ -54,7 +54,7 @@ Then set the plugin variables below and reload MCP servers. Hosts start `node <p
 3. A refresh token from your own consent (`scripts/auth-helper.mjs`, see skill `vehicle-fleet-setup`).
 4. Only for commands: your own `tesla-http-proxy` (from Tesla's `vehicle-command` project), and your virtual key paired with the vehicle via `https://www.tesla.com/_ak/<your-domain>`.
 
-Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; add `vehicle_location` only for location, `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
+Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; add `energy_device_data` only for energy-site reads (`node scripts/auth-helper.mjs url --energy`, or `TESLA_AUTH_ENERGY=1`), `vehicle_location` only for location, `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
 
 ## Plugin variables
 
@@ -71,6 +71,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
 | `TESLA_FLEET_ENABLE_LOCATION` | no | `1`/`true`/`yes`/`on` lists `get_location` |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
+| `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads (e.g. `1234567890`); otherwise the only site on the account |
 | `TESLA_FLEET_KEY_DOMAIN` | no | Your key domain, used only to show the pairing link |
 | `TESLA_FLEET_RATE_DATA_PER_USD` | no | Usage estimate only: data calls per USD (default `500`) |
 | `TESLA_FLEET_RATE_COMMANDS_PER_USD` | no | Usage estimate only: commands per USD (default `1000`) |
@@ -98,7 +99,9 @@ In read-only mode command tools are absent from `tools/list` and refused if call
 
 Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (only with `TESLA_FLEET_ENABLE_LOCATION`; coarse ~1 km unless `precision=precise`).
 
-Tool counts: **11** in the default read-only mode, **22** with `TESLA_FLEET_READ_ONLY` off (11 read + 11 commands), plus `get_location` when location is enabled.
+Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). Energy settings changes (backup reserve, operation mode, storm mode, grid import/export) are **not** supported yet. If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
+
+Tool counts: **15** in the default read-only mode (11 vehicle + 4 energy reads), **26** with `TESLA_FLEET_READ_ONLY` off (+ 11 vehicle commands), plus `get_location` when location is enabled.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -114,7 +117,7 @@ Every command:
 
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
-Out of scope for v0.1 (TODO in `BACKLOG.md`): energy products (Powerwall/solar), Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, horn/lights, media, software updates.
+Out of scope (TODO in `BACKLOG.md`): energy settings commands, Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, horn/lights, media, software updates.
 
 ## Usage counter (local estimate)
 

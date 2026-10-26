@@ -8,6 +8,9 @@
 | local | `vehicle_not_online` | no* | state is asleep/offline | no auto-wake; offer `wake_vehicle` |
 | local | `vin_required` / `vin_ambiguous` | no | unlock/trunk need explicit vin; several cars | ask which car |
 | local | `rate_limited_locally` | no | local bucket empty | wait `retryAfterSec` |
+| local | `missing_energy_scope` | yes (the 403) | energy call refused; token lacks `energy_device_data` | re-run `auth-helper.mjs url --energy` and sign in once |
+| local | `bad_history_args` / `bad_site_id` | no | invalid or too-long energy history range, or a non-numeric site id | fix the arguments |
+| local | `site_ambiguous` / `no_energy_sites` | no | several sites, or none visible | pass `energy_site_id`; check the energy scope |
 | local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` (alias `TESLA_FLEET_PROXY_URL`) | configure proxy |
 | 401 | `unauthorized` | yes | access token expired | refreshed once automatically |
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |

@@ -33,6 +33,12 @@ export const CACHED_TTL_MS = 60_000;
 export const FLEET_STATUS_TTL_MS = 10 * 60_000;
 /** Vehicle list reused for VIN resolution (the set of cars rarely changes). */
 export const VEHICLE_LIST_TTL_MS = 5 * 60_000;
+export const ENERGY_LIVE_TTL_MS = 60_000;
+export const ENERGY_INFO_TTL_MS = 10 * 60_000;
+export const ENERGY_HISTORY_TTL_MS = 5 * 60_000;
+
+/** One energy product from GET /api/1/products (fields used here only). */
+export type EnergyProduct = { energy_site_id: number | string; site_name?: string; resource_type?: string } & Record<string, unknown>;
 
 /** Build the proxy dispatcher. Uses the configured CA only; certificate verification is never disabled. */
 export function buildProxyDispatcher(caPath: string | undefined): Dispatcher | undefined {
@@ -221,6 +227,66 @@ export class FleetClient {
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
+  }
+
+  // ---- Energy sites (Powerwall / solar / Wall Connector via site live_status). Read-only. ----
+
+  /** Energy products from GET /api/1/products (vehicles filtered out). fresh=false reuses a 5-min list. */
+  async listEnergySites(fresh = true): Promise<EnergyProduct[]> {
+    if (!fresh) {
+      const hit = this.cache.get<EnergyProduct[]>("energy_sites", VEHICLE_LIST_TTL_MS);
+      if (hit) return hit.value;
+    }
+    const base = await this.resolveBaseUrl();
+    const res = await this.call("other", "GET", `${base}/api/1/products`);
+    const all = unwrap<Array<Record<string, unknown>>>(res.body) ?? [];
+    const sites = all.filter((p) => p && p.energy_site_id !== undefined && p.energy_site_id !== null) as EnergyProduct[];
+    this.cache.set("energy_sites", sites);
+    return sites;
+  }
+
+  /** Site id: explicit > TESLA_DEFAULT_ENERGY_SITE_ID > the only energy site on the account. */
+  async resolveSiteId(id: unknown): Promise<string> {
+    const clean = (v: string) => {
+      if (!/^\d{1,20}$/.test(v)) throw new LocalRefusal("bad_site_id", "energy_site_id must be digits only (e.g. 1234567890).");
+      return v;
+    };
+    if ((typeof id === "string" && id.trim()) || typeof id === "number") return clean(String(id).trim());
+    if (this.config.defaultEnergySiteId) return clean(this.config.defaultEnergySiteId);
+    const sites = await this.listEnergySites(false);
+    const ids = [...new Set(sites.map((s) => String(s.energy_site_id)))];
+    if (ids.length === 1) return ids[0];
+    if (ids.length === 0) throw new LocalRefusal("no_energy_sites", "No energy sites on this account (or the token lacks energy_device_data).");
+    throw new LocalRefusal("site_ambiguous", "More than one energy site; pass energy_site_id.", undefined, {
+      sites: sites.map((s) => ({ energy_site_id: String(s.energy_site_id), site_name: s.site_name, resource_type: s.resource_type })),
+    });
+  }
+
+  private async energyGet(key: string, ttl: number, siteId: string, path: string): Promise<{ data: Record<string, unknown>; ageSec: number }> {
+    const hit = this.cache.get<Record<string, unknown>>(key, ttl);
+    if (hit) return { data: hit.value, ageSec: hit.ageSec };
+    this.limiter.take("data", `site:${siteId}`);
+    const base = await this.resolveBaseUrl();
+    const res = await this.call("data", "GET", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`);
+    const data = unwrap<Record<string, unknown>>(res.body) ?? {};
+    this.cache.set(key, data);
+    return { data, ageSec: 0 };
+  }
+
+  /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */
+  energyLiveStatus(siteId: string) {
+    return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");
+  }
+
+  /** GET /energy_sites/{id}/site_info (cached 10 min). */
+  energySiteInfo(siteId: string) {
+    return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info");
+  }
+
+  /** GET /energy_sites/{id}/calendar_history with an already-validated, bounded query (cached 5 min). */
+  energyHistory(siteId: string, query: Record<string, string>) {
+    const q = new URLSearchParams(query).toString();
+    return this.energyGet(`energy_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `calendar_history?${q}`);
   }
 
   /** POST wake_up, then poll connectivity state (bounded). Only via the wake_vehicle tool. */
