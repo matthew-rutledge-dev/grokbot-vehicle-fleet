@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1 (unreleased)
+
+Review fixes.
+
+- Node.js 22 or newer is now required (`engines` `>=22`); Node 20 is end of life.
+- CI runs on Node 22 and 24 (ubuntu + windows), with workflow concurrency (cancel in progress) and a 15-minute job timeout.
+- Broader token redaction: error output and startup stderr also redact the stored, spent and rotated refresh tokens and the in-memory access token, not only the `TESLA_REFRESH_TOKEN` seed.
+- Bootstrap scripts and CI install with `npm ci --ignore-scripts`.
+- Dependabot: weekly updates for GitHub Actions and npm.
+
 ## 0.1.0 (unreleased)
 
 - First scaffold: one `vehicle-fleet` stdio MCP server, five skills, three manifests (Grok Build, Grok Bot/root, Cursor) and two MCP configs.

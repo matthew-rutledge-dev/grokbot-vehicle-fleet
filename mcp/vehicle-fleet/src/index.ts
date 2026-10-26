@@ -1,15 +1,30 @@
 #!/usr/bin/env node
 /** vehicle-fleet MCP entry point (stdio). See server.ts. */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import type { ToolContext } from "./context.js";
+import { redactSecrets } from "./redact.js";
 import { buildContext, createServer } from "./server.js";
 
+let ctx: ToolContext | undefined;
+
+/** Every secret known at this point; ctx may be unset if startup failed early. */
+function secrets(): Array<string | undefined> {
+  const out: Array<string | undefined> = [process.env.TESLA_REFRESH_TOKEN, process.env.TESLA_CLIENT_SECRET];
+  if (ctx) out.push(ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues());
+  return out;
+}
+
+function logErr(text: string): void {
+  console.error(redactSecrets(text, secrets()));
+}
+
 async function main() {
-  const ctx = buildContext();
-  for (const w of ctx.config.warnings) console.error(w);
+  ctx = buildContext();
+  for (const w of ctx.config.warnings) logErr(w);
   await createServer(ctx).connect(new StdioServerTransport());
 }
 
 main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
+  logErr(err instanceof Error ? err.message : String(err));
   process.exit(1);
 });
