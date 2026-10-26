@@ -148,6 +148,10 @@ No other endpoints, no telemetry, no analytics.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
 
+## Roadmap
+
+- Planned: a Home Assistant custom integration (`custom_components/vehicle_fleet/`, installable via the HA Marketplace or HACS) in this repo, after v0.1. See `BACKLOG.md`.
+
 ## Development
 
 ```bash
