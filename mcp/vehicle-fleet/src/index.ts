@@ -9,7 +9,9 @@ let ctx: ToolContext | undefined;
 
 /** Every secret known at this point; ctx may be unset if startup failed early. */
 function secrets(): Array<string | undefined> {
-  const out: Array<string | undefined> = [process.env.TESLA_REFRESH_TOKEN, process.env.TESLA_CLIENT_SECRET];
+  const out: Array<string | undefined> = [
+    process.env.TESLA_REFRESH_TOKEN, process.env.TESLA_CLIENT_SECRET, process.env.TESLA_FLEET_CLIENT_SECRET,
+  ];
   if (ctx) out.push(ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues());
   return out;
 }

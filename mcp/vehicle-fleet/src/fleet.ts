@@ -31,6 +31,8 @@ export const STATE_TTL_MS = 30_000;
 export const LIVE_TTL_MS = 60_000;
 export const CACHED_TTL_MS = 60_000;
 export const FLEET_STATUS_TTL_MS = 10 * 60_000;
+/** Vehicle list reused for VIN resolution (the set of cars rarely changes). */
+export const VEHICLE_LIST_TTL_MS = 5 * 60_000;
 
 /** Build the proxy dispatcher. Uses the configured CA only; certificate verification is never disabled. */
 export function buildProxyDispatcher(caPath: string | undefined): Dispatcher | undefined {
@@ -122,11 +124,17 @@ export class FleetClient {
     return this.baseUrl ?? this.tokens.storedBaseUrl() ?? REGION_BASE_URLS.na;
   }
 
-  async listVehicles(): Promise<VehicleSummary[]> {
+  /** GET /api/1/vehicles. fresh=false reuses a list fetched in the last 5 min. */
+  async listVehicles(fresh = true): Promise<VehicleSummary[]> {
+    if (!fresh) {
+      const hit = this.cache.get<VehicleSummary[]>("vehicles", VEHICLE_LIST_TTL_MS);
+      if (hit) return hit.value;
+    }
     const base = await this.resolveBaseUrl();
     const res = await this.call("other", "GET", `${base}/api/1/vehicles`);
     const list = unwrap<VehicleSummary[]>(res.body) ?? [];
     for (const v of list) this.cache.set(`state:${v.vin}`, v);
+    this.cache.set("vehicles", list);
     return list;
   }
 
@@ -137,7 +145,7 @@ export class FleetClient {
       throw new LocalRefusal("vin_required", "This command needs an explicit vin (no default) because it can open the vehicle.");
     }
     if (this.config.defaultVin) return this.config.defaultVin.toUpperCase();
-    const list = await this.listVehicles();
+    const list = await this.listVehicles(false);
     if (list.length === 1) return list[0].vin;
     if (list.length === 0) throw new LocalRefusal("no_vehicles", "No vehicles on this account.");
     throw new LocalRefusal("vin_ambiguous", "More than one vehicle; pass vin.", undefined, {

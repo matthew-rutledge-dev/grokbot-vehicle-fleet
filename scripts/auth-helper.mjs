@@ -12,8 +12,8 @@
  *        the refresh token to the token store.
  *
  * Env (your own values; never commit them):
- *   TESLA_CLIENT_ID       required
- *   TESLA_CLIENT_SECRET   required for `exchange`
+ *   TESLA_CLIENT_ID       required (alias: TESLA_FLEET_CLIENT_ID; primary wins)
+ *   TESLA_CLIENT_SECRET   required for `exchange` (alias: TESLA_FLEET_CLIENT_SECRET)
  *   TESLA_REDIRECT_URI    required; must match a redirect URI on your app
  *   TESLA_AUTH_SCOPES     optional; default read-only:
  *                         "openid offline_access vehicle_device_data"
@@ -42,6 +42,7 @@ const die = (msg) => {
   console.error(`auth-helper: ${msg}`);
   process.exit(1);
 };
+const envAlias = (k, alias) => env(k) ?? env(alias);
 const sha256 = (s) => createHash("sha256").update(s).digest("hex");
 
 function storePath() {
@@ -77,7 +78,7 @@ function audience() {
 const statePath = () => path.join(path.dirname(storePath()), "auth-state.json");
 
 async function cmdUrl() {
-  const clientId = env("TESLA_CLIENT_ID") ?? die("TESLA_CLIENT_ID is not set");
+  const clientId = envAlias("TESLA_CLIENT_ID", "TESLA_FLEET_CLIENT_ID") ?? die("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set");
   const redirect = env("TESLA_REDIRECT_URI") ?? die("TESLA_REDIRECT_URI is not set");
   const state = randomBytes(16).toString("hex");
   writeJson0600(statePath(), { state, created_at: new Date().toISOString() });
@@ -95,8 +96,8 @@ async function cmdUrl() {
 
 async function cmdExchange(input) {
   if (!input) die("pass the full redirect URL (or the code)");
-  const clientId = env("TESLA_CLIENT_ID") ?? die("TESLA_CLIENT_ID is not set");
-  const secret = env("TESLA_CLIENT_SECRET") ?? die("TESLA_CLIENT_SECRET is not set");
+  const clientId = envAlias("TESLA_CLIENT_ID", "TESLA_FLEET_CLIENT_ID") ?? die("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set");
+  const secret = envAlias("TESLA_CLIENT_SECRET", "TESLA_FLEET_CLIENT_SECRET") ?? die("TESLA_CLIENT_SECRET (or TESLA_FLEET_CLIENT_SECRET) is not set");
   const redirect = env("TESLA_REDIRECT_URI") ?? die("TESLA_REDIRECT_URI is not set");
   let code = input.trim();
   if (/^https?:\/\//.test(code)) {

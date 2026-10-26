@@ -20,11 +20,13 @@ export const DEFAULT_AUTH_BASE_URL = "https://fleet-auth.prd.vn.cloud.tesla.com"
 
 export const ENV = {
   CLIENT_ID: "TESLA_CLIENT_ID",
+  CLIENT_ID_ALIAS: "TESLA_FLEET_CLIENT_ID",
   REFRESH_TOKEN: "TESLA_REFRESH_TOKEN",
   REGION: "TESLA_FLEET_REGION",
   BASE_URL: "TESLA_FLEET_BASE_URL",
   AUTH_BASE_URL: "TESLA_FLEET_AUTH_BASE_URL",
   PROXY_URL: "TESLA_COMMAND_PROXY_URL",
+  PROXY_URL_ALIAS: "TESLA_FLEET_PROXY_URL",
   PROXY_CA_CERT: "TESLA_COMMAND_PROXY_CA_CERT",
   TOKEN_STORE: "TESLA_TOKEN_STORE",
   READ_ONLY: READ_ONLY_ENV,
@@ -77,6 +79,14 @@ export function checkUrl(name: string, value: string): { url?: string; problem?:
     };
   }
   return { problem: `${name} must use https (plain http is allowed only for loopback hosts)` };
+}
+
+/**
+ * Primary name wins; the alias is read only when the primary is unset.
+ * Aliases let an existing env loader (TESLA_FLEET_*) feed the plugin unchanged.
+ */
+export function readEnvWithAlias(primary: string, alias: string, env: Env = process.env): string | undefined {
+  return readEnv(primary, env) ?? readEnv(alias, env);
 }
 
 export function defaultTokenStorePath(env: Env = process.env): string {
@@ -144,7 +154,7 @@ export function loadConfig(env: Env = process.env): Config {
   }
 
   let proxyUrl: string | undefined;
-  const rawProxy = readEnv(ENV.PROXY_URL, env);
+  const rawProxy = readEnvWithAlias(ENV.PROXY_URL, ENV.PROXY_URL_ALIAS, env);
   if (rawProxy) {
     const c = checkUrl(ENV.PROXY_URL, rawProxy);
     if (c.problem) problems.push(c.problem);
@@ -154,8 +164,8 @@ export function loadConfig(env: Env = process.env): Config {
 
   const rates = Object.freeze(loadRates(env, warnings));
 
-  const clientId = readEnv(ENV.CLIENT_ID, env);
-  if (!clientId) problems.push(`${ENV.CLIENT_ID} is not set`);
+  const clientId = readEnvWithAlias(ENV.CLIENT_ID, ENV.CLIENT_ID_ALIAS, env);
+  if (!clientId) problems.push(`${ENV.CLIENT_ID} (or ${ENV.CLIENT_ID_ALIAS}) is not set`);
 
   return Object.freeze({
     clientId,

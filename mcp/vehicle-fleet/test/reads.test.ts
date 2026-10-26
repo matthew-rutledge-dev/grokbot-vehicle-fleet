@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BASE, SEED, VIN, baseEnv, body, connect, isError, setup } from "./helpers.js";
+import { BASE, SEED, VIN, baseEnv, body, connect, fixtureData, isError, setup } from "./helpers.js";
 
 const wakeCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes("wake_up"));
 
@@ -121,4 +121,44 @@ test("error output redacts the rotated refresh token and access token, not just 
   assert.ok(ctx.tokens.secretValues().includes("rotated-EXAMPLE-1"), "store now holds the rotated token");
   for (const s of [SEED, "rotated-EXAMPLE-1", "access-EXAMPLE-1"]) assert.ok(!text.includes(s), `redacted: ${s}`);
   assert.ok(text.includes("[redacted]"));
+});
+
+test("VIN resolution lists vehicles once across several reads (no default VIN)", async () => {
+  const env = baseEnv();
+  const { ctx, calls } = setup(env);
+  const c = await connect(ctx);
+  assert.equal(body(await c.callTool({ name: "get_battery_charge", arguments: {} })).ok, true);
+  assert.equal(body(await c.callTool({ name: "get_fleet_status", arguments: {} })).ok, true);
+  assert.equal(body(await c.callTool({ name: "get_vehicle_state", arguments: {} })).ok, true);
+  const lists = calls.filter((x) => x.method === "GET" && new URL(x.url).pathname === "/api/1/vehicles");
+  assert.equal(lists.length, 1);
+});
+
+test("list_vehicles itself always fetches a fresh list", async () => {
+  const { ctx, calls } = setup(baseEnv());
+  const c = await connect(ctx);
+  await c.callTool({ name: "get_battery_charge", arguments: {} });
+  await c.callTool({ name: "list_vehicles", arguments: {} });
+  const lists = calls.filter((x) => x.method === "GET" && new URL(x.url).pathname === "/api/1/vehicles");
+  assert.equal(lists.length, 2);
+});
+
+test("api_status returns the plain-text body, not a non_json_response error", async () => {
+  const { ctx } = setup(baseEnv(), { [`GET ${BASE}/status`]: () => ({ status: 200, body: "ok" }) });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "api_status", arguments: {} }));
+  assert.equal(b.ok, true);
+  assert.equal(b.status, "ok");
+});
+
+test("closures: windows reported as unknown when the data has no window fields", async () => {
+  const data = fixtureData();
+  const vs = data.vehicle_state as Record<string, unknown>;
+  for (const k of ["fd_window", "fp_window", "rd_window", "rp_window"]) delete vs[k];
+  const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }), {
+    [`GET ${BASE}/api/1/vehicles/${VIN}/vehicle_data_cached`]: () => ({ status: 200, body: { response: data } }),
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "get_closures", arguments: {} }));
+  assert.match(String((b.closures as Record<string, unknown>).windowsOpen), /^unknown/);
 });
