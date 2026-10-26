@@ -26,6 +26,9 @@ test("schema audit: no read tool takes confirm; every command requires confirm +
   }
 });
 
-test("no energy tools in v0.1", () => {
-  assert.ok(!ALL_TOOL_DEFS.some((d) => /energy|powerwall|solar/i.test(d.tool.name)));
+test("energy tools are read-only reads; no energy write tools exist", () => {
+  const energy = ALL_TOOL_DEFS.filter((d) => /energy/i.test(d.tool.name));
+  assert.deepEqual(energy.map((d) => d.tool.name).sort(), ["get_energy_history", "get_energy_live_status", "get_energy_site_info", "list_energy_sites"]);
+  assert.ok(energy.every((d) => d.kind === "read"));
+  assert.ok(!ALL_TOOL_DEFS.some((d) => /backup_reserve|operation_mode|storm_mode|grid_import|export_rule/i.test(d.tool.name)));
 });

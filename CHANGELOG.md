@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+Energy-site reads (Powerwall / solar; Wall Connector via site live status). Read-only; no energy commands.
+
+- New read tools: `list_energy_sites` (`GET /api/1/products`, vehicles filtered out, gateway ids dropped), `get_energy_live_status` (power flows, battery %, grid/island status, storm watch, plus `wall_connectors` state and power; cached 60 s), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate; address and tariff fields are not returned; cached 10 min) and `get_energy_history` (`calendar_history`, `kind=energy` totals or `kind=backup` events; bounded ranges per period; validated before any call; cached 5 min).
+- Site resolution: explicit `energy_site_id` > `TESLA_DEFAULT_ENERGY_SITE_ID` > the only site; the product list is reused for 5 minutes.
+- `percentage_charged` is rounded to one decimal; live status includes a power sign note.
+- Only scope-related 403s map to `missing_scope` (energy calls: `missing_energy_scope` with the re-consent hint); other 403s stay a generic `forbidden`.
+- `energy_site_id` must be a string of digits; numbers are refused, and an unsafe numeric id from the API is refused instead of rounded.
+- Auth helper: `url --energy` or `TESLA_AUTH_ENERGY=1` adds the `energy_device_data` scope. The default scopes are unchanged.
+- Energy reads are counted as `data` in `get_api_usage`.
+- Tool counts: 15 read-only (11 vehicle + 4 energy), 26 with commands on.
+- Manifests, MCP configs, README, skills and troubleshooting reference updated.
+
 ## 0.1.2 (unreleased)
 
 Fixes from the first read-only live test.

@@ -191,7 +191,7 @@ export class UsageTracker {
       note: "LOCAL ESTIMATE: counts only Fleet API calls made by this server (not Home Assistant, other apps, or other machines). The billing and usage page of your app on the developer portal is the source of truth.",
       billingRule: "Responses with HTTP status < 500 are billable; >= 500 are not billed (counted as notBilled). noResponse = network error or timeout (no status seen).",
       categories: {
-        data: "device data reads (vehicle_data, vehicle_data_cached, location)",
+        data: "device data reads (vehicle_data, vehicle_data_cached, location, energy site live_status / site_info / calendar_history)",
         command: "commands sent via your command proxy",
         wake: "wake_up",
         other: "endpoints with no documented pricing category here (vehicle list/state, fleet_status, region lookup, /status). Not priced in the estimate; see otherNotPriced.",

@@ -7,10 +7,11 @@
  */
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
 import { COMMAND_TOOLS } from "./tools/commands.js";
+import { ENERGY_TOOLS } from "./tools/energy.js";
 import { READ_TOOLS } from "./tools/read.js";
 import type { ToolDef } from "./tools/types.js";
 
-export const ALL_TOOL_DEFS: ToolDef[] = [...READ_TOOLS, ...COMMAND_TOOLS];
+export const ALL_TOOL_DEFS: ToolDef[] = [...READ_TOOLS, ...ENERGY_TOOLS, ...COMMAND_TOOLS];
 
 export const COMMAND_TOOL_NAMES: ReadonlySet<string> = new Set(COMMAND_TOOLS.map((t) => t.tool.name));
 export const LOCATION_TOOL_NAMES: ReadonlySet<string> = new Set(

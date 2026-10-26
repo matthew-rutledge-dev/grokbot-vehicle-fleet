@@ -29,4 +29,4 @@ Only when command tools are listed (read-only explicitly off) and the user asked
 
 ## Not in v0.1
 
-Remote start, valet/PIN/speed limit, guest mode, sharing invites, HomeLink, windows, horn/lights, media, software updates, energy products.
+Remote start, valet/PIN/speed limit, guest mode, sharing invites, HomeLink, windows, horn/lights, media, software updates, energy-site settings (backup reserve, operation mode, storm mode, grid import/export).

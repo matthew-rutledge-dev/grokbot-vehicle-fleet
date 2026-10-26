@@ -4,7 +4,8 @@ No secrets in this file.
 
 ## TODO
 
-- **Energy products (out of scope for v0.1):** Powerwall/solar read tools (`live_status`, `site_info`) and confirm-gated settings (backup reserve, operation mode, storm mode). Needs scopes `energy_device_data` / `energy_cmds`, same read-only + confirm gating.
+- **Energy settings commands:** confirm-gated, hidden under read-only: backup reserve, operation mode, storm mode, grid import/export and grid charging, off-grid vehicle charging reserve. Needs `energy_cmds`. (Energy reads shipped in 0.2.0.)
+- Pin energy `live_status` / `site_info` / `calendar_history` field names against a redacted real response; add fixtures.
 - Pin `vehicle_data_cached` and TPMS field names/units against a redacted real response; add it as a fixture.
 - Confirm the pricing category of `GET /api/1/vehicles/{vin}` and `fleet_status` and adjust the dry-run cost estimate and the `other` bucket of `get_api_usage`.
 - Verify the `navigation_request` body shape against the current proxy.

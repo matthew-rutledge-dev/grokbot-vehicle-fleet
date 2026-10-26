@@ -110,7 +110,7 @@ export const READ_TOOLS: ToolDef[] = [
       auth: ctx.tokens.status(),
       billableCallsThisSession: ctx.fleet.billableCalls,
       rules: RULES_SUMMARY,
-      outOfScope: "Energy products (Powerwall/solar) are not supported in v0.1 (TODO).",
+      energy: "Energy sites (Powerwall/solar, Wall Connector via site live_status): read-only tools; need the energy_device_data scope. Energy settings changes are not supported.",
     }),
   },
   {

@@ -32,6 +32,7 @@ export const ENV = {
   READ_ONLY: READ_ONLY_ENV,
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
   DEFAULT_VIN: "TESLA_DEFAULT_VIN",
+  DEFAULT_ENERGY_SITE: "TESLA_DEFAULT_ENERGY_SITE_ID",
   KEY_DOMAIN: "TESLA_FLEET_KEY_DOMAIN",
   RATE_DATA: "TESLA_FLEET_RATE_DATA_PER_USD",
   RATE_COMMANDS: "TESLA_FLEET_RATE_COMMANDS_PER_USD",
@@ -51,6 +52,8 @@ export type Config = {
   readOnly: ReadOnlyResolution;
   locationEnabled: boolean;
   defaultVin?: string;
+  /** Optional default energy_site_id for energy reads. */
+  defaultEnergySiteId?: string;
   keyDomain?: string;
   /** Rates for the local usage estimate (get_api_usage). */
   rates: Rates;
@@ -179,6 +182,7 @@ export function loadConfig(env: Env = process.env): Config {
     readOnly,
     locationEnabled: readOptInFlag(ENV.ENABLE_LOCATION, env),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
+    defaultEnergySiteId: readEnv(ENV.DEFAULT_ENERGY_SITE, env),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
     rates,
     problems,

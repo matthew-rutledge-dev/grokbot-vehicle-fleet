@@ -8,12 +8,16 @@
 | local | `vehicle_not_online` | no* | state is asleep/offline | no auto-wake; offer `wake_vehicle` |
 | local | `vin_required` / `vin_ambiguous` | no | unlock/trunk need explicit vin; several cars | ask which car |
 | local | `rate_limited_locally` | no | local bucket empty | wait `retryAfterSec` |
+| local | `missing_energy_scope` | yes (the 403) | energy call refused; token lacks `energy_device_data` | re-run `auth-helper.mjs url --energy` and sign in once |
+| local | `bad_history_args` / `bad_site_id` | no | invalid or too-long energy history range, or a non-numeric site id | fix the arguments |
+| local | `site_ambiguous` / `no_energy_sites` | no | several sites, or none visible | pass `energy_site_id`; check the energy scope |
 | local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` (alias `TESLA_FLEET_PROXY_URL`) | configure proxy |
 | 401 | `unauthorized` | yes | access token expired | refreshed once automatically |
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |
 | 401 | `mobile_access_disabled` | yes | remote access off in the car | enable in car |
 | 402 | `payment_required` | yes | billing | developer portal |
-| 403 | `forbidden` | yes | missing scope | re-consent with the needed scope |
+| 403 | `missing_scope` | yes | token lacks a scope (energy calls report `missing_energy_scope`) | re-consent with the needed scope |
+| 403 | `forbidden` | yes | refused for another reason (no access to this vehicle/site) | check account access |
 | 403 | `command_protocol_required` | yes | unsigned command | use the proxy |
 | 404 | `not_found` | yes | no cached data / unknown vehicle | `live=true` if online |
 | 408 | `vehicle_unavailable` | yes | asleep/offline/poor signal | later; do not loop |

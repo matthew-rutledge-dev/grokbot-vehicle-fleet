@@ -76,8 +76,11 @@ export function mapFleetError(
       if (text.includes("command protocol"))
         return mk("command_protocol_required", "This vehicle requires signed commands (Vehicle Command Protocol).",
           "Set TESLA_COMMAND_PROXY_URL to your own tesla-http-proxy.");
-      return mk("forbidden", "Not authorized: a required OAuth scope is probably missing.",
-        "Re-consent with the scopes this tool needs (see skill vehicle-fleet-troubleshoot).");
+      if (/scope/.test(text))
+        return mk("missing_scope", "Not authorized: the token is missing an OAuth scope this endpoint needs.",
+          "Re-consent with the scopes this tool needs (see skill vehicle-fleet-troubleshoot).");
+      return mk("forbidden", "Forbidden: the Fleet API refused this request for this account or resource.",
+        "Check that the account owns or shares this vehicle or site; if it persists, see skill vehicle-fleet-troubleshoot.");
     case 404:
       return mk("not_found", desc || err || "Resource not found (or no cached data for this vehicle).");
     case 408:

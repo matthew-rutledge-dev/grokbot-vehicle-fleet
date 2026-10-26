@@ -4,7 +4,7 @@
  * Gets the FIRST refresh token for YOUR developer app and writes it to the
  * plugin's token store (mode 0600). Prints no secret values.
  *
- *   1) node scripts/auth-helper.mjs url
+ *   1) node scripts/auth-helper.mjs url [--energy]
  *        Prints the authorize URL (auth.tesla.com) and saves a random state.
  *        Open it, sign in, approve the scopes, and copy the full redirect URL.
  *   2) node scripts/auth-helper.mjs exchange "<full redirect URL or code>"
@@ -17,6 +17,8 @@
  *   TESLA_REDIRECT_URI    required; must match a redirect URI on your app
  *   TESLA_AUTH_SCOPES     optional; default read-only:
  *                         "openid offline_access vehicle_device_data"
+ *   TESLA_AUTH_ENERGY     optional; 1/true/yes/on (or `url --energy`) adds the
+ *                         read-only energy_device_data scope (Powerwall/solar)
  *                         add vehicle_location / vehicle_cmds / vehicle_charging_cmds only if needed
  *   TESLA_FLEET_REGION    optional na|eu|cn (token audience); default na
  *   TESLA_FLEET_BASE_URL  optional explicit audience / base URL
@@ -35,6 +37,14 @@ const REGION_BASE_URLS = {
   cn: "https://fleet-api.prd.cn.vn.cloud.tesla.cn",
 };
 const DEFAULT_SCOPES = "openid offline_access vehicle_device_data";
+const ENERGY_SCOPE = "energy_device_data";
+
+/** Requested scopes: TESLA_AUTH_SCOPES or the read-only default, plus energy_device_data when opted in. */
+function scopes(energy) {
+  const list = (env("TESLA_AUTH_SCOPES") ?? DEFAULT_SCOPES).split(/\s+/).filter(Boolean);
+  if (energy && !list.includes(ENERGY_SCOPE)) list.push(ENERGY_SCOPE);
+  return list.join(" ");
+}
 
 const unset = (v) => typeof v !== "string" || v.trim() === "" || /^\$\{[^}]*\}$/.test(v.trim());
 const env = (k) => (unset(process.env[k]) ? undefined : process.env[k].trim());
@@ -77,7 +87,8 @@ function audience() {
 
 const statePath = () => path.join(path.dirname(storePath()), "auth-state.json");
 
-async function cmdUrl() {
+async function cmdUrl(flags = []) {
+  const energy = flags.includes("--energy") || ["1", "true", "yes", "on"].includes((env("TESLA_AUTH_ENERGY") ?? "").toLowerCase());
   const clientId = envAlias("TESLA_CLIENT_ID", "TESLA_FLEET_CLIENT_ID") ?? die("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set");
   const redirect = env("TESLA_REDIRECT_URI") ?? die("TESLA_REDIRECT_URI is not set");
   const state = randomBytes(16).toString("hex");
@@ -86,7 +97,7 @@ async function cmdUrl() {
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirect);
-  u.searchParams.set("scope", env("TESLA_AUTH_SCOPES") ?? DEFAULT_SCOPES);
+  u.searchParams.set("scope", scopes(energy));
   u.searchParams.set("state", state);
   u.searchParams.set("prompt_missing_scopes", "true");
   console.log("Open this URL, sign in, approve, then copy the full redirect URL:\n");
@@ -145,10 +156,10 @@ async function cmdExchange(input) {
   console.log("You can leave TESLA_REFRESH_TOKEN unset. Reload the MCP server to use it.");
 }
 
-const [cmd, arg] = process.argv.slice(2);
-if (cmd === "url") await cmdUrl();
+const [cmd, arg, ...rest] = process.argv.slice(2);
+if (cmd === "url") await cmdUrl([arg, ...rest].filter(Boolean));
 else if (cmd === "exchange") await cmdExchange(arg);
 else {
-  console.log("usage: node scripts/auth-helper.mjs url | exchange \"<redirect URL or code>\"");
+  console.log("usage: node scripts/auth-helper.mjs url [--energy] | exchange \"<redirect URL or code>\"");
   process.exit(cmd ? 1 : 0);
 }
