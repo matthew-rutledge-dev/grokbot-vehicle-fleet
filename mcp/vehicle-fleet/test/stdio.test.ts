@@ -105,7 +105,7 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS].sort());
-    assert.equal(names.length, 26);
+    assert.equal(names.length, 41);
     assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));

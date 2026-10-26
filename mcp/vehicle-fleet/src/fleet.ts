@@ -279,6 +279,19 @@ export class FleetClient {
     return { data, ageSec: 0 };
   }
 
+  /**
+   * Energy-site setting change: POST /api/1/energy_sites/{id}/{path} directly to the Fleet API
+   * (energy commands are not signed by the vehicle proxy). Billed; never retried.
+   */
+  async energyCommand(siteId: string, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.limiter.take("command", `site:${siteId}`);
+    const base = await this.resolveBaseUrl();
+    const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
+    this.cache.deletePrefix(`energy_info:${siteId}`);
+    this.cache.deletePrefix(`energy_live:${siteId}`);
+    return unwrap<Record<string, unknown>>(res.body) ?? {};
+  }
+
   /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */
   energyLiveStatus(siteId: string) {
     return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");

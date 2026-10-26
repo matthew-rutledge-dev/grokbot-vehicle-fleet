@@ -16,10 +16,14 @@ export const READ_TOOLS = [
   "get_battery_charge", "get_climate", "get_closures", "get_tires", "get_vehicle_snapshot",
   "list_energy_sites", "get_energy_live_status", "get_energy_site_info", "get_energy_history",
 ];
-export const COMMANDS = [
-  "wake_vehicle", "door_lock", "door_unlock", "actuate_trunk", "climate_start", "climate_stop",
-  "set_temps", "charge_start", "charge_stop", "set_charge_limit", "share_navigation",
+export const VEHICLE_COMMANDS = [
+  "wake_vehicle", "climate_warm_up", "door_lock", "door_unlock", "actuate_trunk", "climate_start", "climate_stop",
+  "set_temps", "set_seat_heater", "set_steering_wheel_heater", "set_cabin_overheat_protection", "set_defrost_max",
+  "set_sentry_mode", "flash_lights", "honk_horn", "charge_start", "charge_stop", "set_charge_limit",
+  "set_charging_amps", "charge_port_door_open", "charge_port_door_close", "share_navigation",
 ];
+export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set_storm_mode", "set_grid_import_export"];
+export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS];
 
 export const VIN = "5YJ000000EXAMPLE";
 export const BASE = "https://fleet-api.example.test";

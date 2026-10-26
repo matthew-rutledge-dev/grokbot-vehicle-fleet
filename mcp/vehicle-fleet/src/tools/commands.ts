@@ -1,7 +1,8 @@
 /**
- * Command tools. Hidden and refused unless TESLA_FLEET_READ_ONLY is an
+ * Vehicle command tools. Hidden and refused unless TESLA_FLEET_READ_ONLY is an
  * explicit off value. Each needs confirm=true AND user_request; otherwise a
- * dry-run preview is returned and nothing is sent.
+ * dry-run preview is returned and nothing is sent. With TESLA_FLEET_DRY_RUN on,
+ * even confirmed calls only return the exact request(s) that would be sent.
  *
  * Send pipeline: validate -> resolve VIN -> proxy configured -> vehicle online
  * (never auto-wake) -> virtual key paired (fleet_status, cached) -> POST via
@@ -13,7 +14,9 @@ import type { ToolArgs, ToolContext } from "../context.js";
 import { CONFIRM_PROPS, VIN_PROP } from "./schema.js";
 import type { ToolDef } from "./types.js";
 
-type Built = { body: Record<string, unknown>; preview?: Record<string, unknown> };
+/** One POST to /api/1/vehicles/{vin}/command/{endpoint}. */
+export type Step = { endpoint: string; body: Record<string, unknown> };
+type Built = { steps: Step[]; preview?: Record<string, unknown> };
 
 type CommandSpec = {
   name: string;
@@ -23,26 +26,55 @@ type CommandSpec = {
   requireExplicitVin?: boolean;
   properties?: Record<string, unknown>;
   required?: string[];
-  build?: (args: ToolArgs) => Built;
+  build?: (args: ToolArgs) => { body: Record<string, unknown>; preview?: Record<string, unknown> };
   readBack: string;
 };
 
-function bad(message: string): never {
-  throw new LocalRefusal("invalid_arguments", message);
+export function bad(message: string): never {
+  throw new LocalRefusal("invalid_arguments", `${message}; nothing was sent.`);
 }
 
-function num(v: unknown, name: string): number {
+export function num(v: unknown, name: string): number {
   if (typeof v !== "number" || !Number.isFinite(v)) bad(`${name} must be a number`);
   return v as number;
 }
 
+export function int(v: unknown, name: string, min: number, max: number): number {
+  const n = num(v, name);
+  if (!Number.isInteger(n) || n < min || n > max) bad(`${name} must be an integer from ${min} to ${max}`);
+  return n;
+}
+
+export function bool(v: unknown, name: string): boolean {
+  if (typeof v !== "boolean") bad(`${name} must be true or false`);
+  return v as boolean;
+}
+
 export const MIN_TEMP_C = 15;
 export const MAX_TEMP_C = 28;
+export const MIN_CHARGING_AMPS = 1;
+export const MAX_CHARGING_AMPS = 48;
 
 export function toCelsius(value: number, unit: unknown): number {
   const c = unit === "F" ? ((value - 32) * 5) / 9 : value;
   return Math.round(Math.min(MAX_TEMP_C, Math.max(MIN_TEMP_C, c)) * 2) / 2;
 }
+
+/** Seat positions (Fleet API remote_seat_heater_request). */
+export const SEATS: Record<string, number> = {
+  driver: 0, front_left: 0, passenger: 1, front_right: 1,
+  rear_left: 2, rear_center: 4, rear_right: 5, third_row_left: 7, third_row_right: 8,
+};
+
+/**
+ * Seat heater body. The Fleet API docs name the fields seat_position / seat_heater_level;
+ * tesla-http-proxy has historically read heater / level. Both are sent so either reader works.
+ */
+export function seatHeaterBody(position: number, level: number): Record<string, unknown> {
+  return { seat_position: position, seat_heater_level: level, heater: position, level };
+}
+
+const ON_PROP = { on: { type: "boolean" } } as const;
 
 const SPECS: CommandSpec[] = [
   {
@@ -67,7 +99,7 @@ const SPECS: CommandSpec[] = [
   },
   {
     name: "climate_start", endpoint: "auto_conditioning_start", scope: "vehicle_cmds", readBack: "get_climate",
-    description: "Start climate preconditioning.",
+    description: "Start climate at the current set points. For a plain 'turn on the heat / warm up the car' use climate_warm_up.",
   },
   {
     name: "climate_stop", endpoint: "auto_conditioning_stop", scope: "vehicle_cmds", readBack: "get_climate",
@@ -89,6 +121,52 @@ const SPECS: CommandSpec[] = [
     },
   },
   {
+    name: "set_seat_heater", endpoint: "remote_seat_heater_request", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Set one seat heater level 0-3 (0 = off). Climate must be on for it to take effect.",
+    properties: {
+      seat: { type: "string", enum: Object.keys(SEATS), description: "driver/front_left, passenger/front_right, rear_left, rear_center, rear_right, third_row_left, third_row_right." },
+      level: { type: "integer", minimum: 0, maximum: 3 },
+    },
+    required: ["seat", "level"],
+    build: (a) => {
+      if (typeof a.seat !== "string" || !(a.seat in SEATS)) bad(`seat must be one of ${Object.keys(SEATS).join(", ")}`);
+      return { body: seatHeaterBody(SEATS[a.seat as string], int(a.level, "level", 0, 3)) };
+    },
+  },
+  {
+    name: "set_steering_wheel_heater", endpoint: "remote_steering_wheel_heater_request", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Turn the steering wheel heater on or off. Climate must be on.",
+    properties: ON_PROP, required: ["on"],
+    build: (a) => ({ body: { on: bool(a.on, "on") } }),
+  },
+  {
+    name: "set_cabin_overheat_protection", endpoint: "set_cabin_overheat_protection", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Cabin overheat protection on/off; fan_only=true uses the fan without A/C.",
+    properties: { ...ON_PROP, fan_only: { type: "boolean", description: "Default false." } },
+    required: ["on"],
+    build: (a) => ({ body: { on: bool(a.on, "on"), fan_only: a.fan_only === undefined ? false : bool(a.fan_only, "fan_only") } }),
+  },
+  {
+    name: "set_defrost_max", endpoint: "set_preconditioning_max", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Max defrost / preconditioning on or off (front defrost and max heat).",
+    properties: ON_PROP, required: ["on"],
+    build: (a) => ({ body: { on: bool(a.on, "on") } }),
+  },
+  {
+    name: "set_sentry_mode", endpoint: "set_sentry_mode", scope: "vehicle_cmds", readBack: "get_closures",
+    description: "Sentry mode on or off (keeps the car awake while on).",
+    properties: ON_PROP, required: ["on"],
+    build: (a) => ({ body: { on: bool(a.on, "on") } }),
+  },
+  {
+    name: "flash_lights", endpoint: "flash_lights", scope: "vehicle_cmds", readBack: "get_vehicle_state",
+    description: "Briefly flash the headlights.",
+  },
+  {
+    name: "honk_horn", endpoint: "honk_horn", scope: "vehicle_cmds", readBack: "get_vehicle_state",
+    description: "Honk the horn once (noisy: make sure the user means it).",
+  },
+  {
     name: "charge_start", endpoint: "charge_start", scope: "vehicle_charging_cmds", readBack: "get_battery_charge",
     description: "Start charging (vehicle must be plugged in).",
   },
@@ -101,11 +179,22 @@ const SPECS: CommandSpec[] = [
     description: "Set the charge limit percent (50-100). Does not start charging.",
     properties: { percent: { type: "integer", minimum: 50, maximum: 100 } },
     required: ["percent"],
-    build: (a) => {
-      const p = num(a.percent, "percent");
-      if (!Number.isInteger(p) || p < 50 || p > 100) bad("percent must be an integer from 50 to 100");
-      return { body: { percent: p } };
-    },
+    build: (a) => ({ body: { percent: int(a.percent, "percent", 50, 100) } }),
+  },
+  {
+    name: "set_charging_amps", endpoint: "set_charging_amps", scope: "vehicle_charging_cmds", readBack: "get_battery_charge",
+    description: `Set the charging current in amps (${MIN_CHARGING_AMPS}-${MAX_CHARGING_AMPS}; the car caps it at what the charger allows).`,
+    properties: { charging_amps: { type: "integer", minimum: MIN_CHARGING_AMPS, maximum: MAX_CHARGING_AMPS } },
+    required: ["charging_amps"],
+    build: (a) => ({ body: { charging_amps: int(a.charging_amps, "charging_amps", MIN_CHARGING_AMPS, MAX_CHARGING_AMPS) } }),
+  },
+  {
+    name: "charge_port_door_open", endpoint: "charge_port_door_open", scope: "vehicle_charging_cmds", readBack: "get_battery_charge",
+    description: "Open the charge port door (also unlatches a connected cable on some models).",
+  },
+  {
+    name: "charge_port_door_close", endpoint: "charge_port_door_close", scope: "vehicle_charging_cmds", readBack: "get_battery_charge",
+    description: "Close the charge port door.",
   },
   {
     name: "share_navigation", endpoint: "navigation_request", scope: "vehicle_cmds", readBack: "get_vehicle_state",
@@ -142,7 +231,7 @@ function offlineVin(args: ToolArgs, ctx: ToolContext, explicit?: boolean): strin
   return explicit ? undefined : ctx.config.defaultVin?.toUpperCase();
 }
 
-function requireIntent(args: ToolArgs): void {
+export function requireIntent(args: ToolArgs): void {
   if (typeof args.user_request !== "string" || args.user_request.trim().length < 3) {
     throw new LocalRefusal("user_request_required",
       "confirm=true needs user_request: a short quote of the human's explicit request in this conversation. Nothing was sent.",
@@ -155,12 +244,184 @@ function pairingHint(ctx: ToolContext): string {
   return `Pair the app's virtual key in the Tesla app: https://www.tesla.com/_ak/${domain}`;
 }
 
+/** Which auth-helper flag adds a scope. */
+export function scopeHint(scope: string): string {
+  const flag = scope === "energy_cmds" ? "--energy-commands" : scope === "energy_device_data" ? "--energy" : "--commands";
+  return `Add the ${scope} scope: re-run node scripts/auth-helper.mjs url ${flag}, sign in once, then reload the MCP server.`;
+}
+
 function isTimeout(e: unknown): boolean {
   const n = (e as { name?: string })?.name;
   return n === "TimeoutError" || n === "AbortError";
 }
 
+const NOT_SENT_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUNREACH", "ENETUNREACH"]);
+const TLS_CODES = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ALTNAME|ERR_TLS/;
+
+/** Connection-level failure before any request reached the target: definitely not sent. */
+export function connectFailure(e: unknown): { code: string; message: string } | undefined {
+  const cause = (e as { cause?: { code?: string } })?.cause;
+  const code = cause?.code ?? (e as { code?: string })?.code;
+  if (!code) return undefined;
+  if (NOT_SENT_NET.has(code)) return { code: "proxy_unreachable", message: `Could not connect to the command proxy (${code}); nothing was sent.` };
+  if (TLS_CODES.test(code)) return { code: "proxy_tls_error", message: `TLS check failed for the command proxy (${code}); nothing was sent. Check TESLA_COMMAND_PROXY_CA_CERT and the certificate's host name.` };
+  return undefined;
+}
+
+/** Steps planned for the climate_warm_up preset (cold-dependent steps resolved at send time). */
+export type WarmUpPlan = { steps: Step[]; conditional: Array<Step & { when: string }> };
+
+export function planWarmUp(args: ToolArgs, ctx: ToolContext, outsideC?: number): WarmUpPlan {
+  const d = ctx.config.climate;
+  const temp = args.temp === undefined ? d.tempC : toCelsius(num(args.temp, "temp"), args.unit);
+  const seatArg = args.seat_heat ?? "auto";
+  if (!(seatArg === "auto" || seatArg === "off" || (typeof seatArg === "number" && Number.isInteger(seatArg) && seatArg >= 0 && seatArg <= 3))) {
+    bad("seat_heat must be auto, off, or a level 0-3");
+  }
+  const defArg = args.defrost ?? "auto";
+  if (!(defArg === "auto" || defArg === true || defArg === false)) bad("defrost must be auto, true or false");
+  const seatsArg = args.seats ?? d.seats;
+  if (!(seatsArg === "driver" || seatsArg === "front" || seatsArg === "none")) bad("seats must be driver, front or none");
+
+  const steps: Step[] = [
+    { endpoint: "auto_conditioning_start", body: {} },
+    { endpoint: "set_temps", body: { driver_temp: temp, passenger_temp: temp } },
+  ];
+  const conditional: Array<Step & { when: string }> = [];
+  const positions = seatsArg === "front" ? [SEATS.driver, SEATS.passenger] : seatsArg === "driver" ? [SEATS.driver] : [];
+  const cold = outsideC !== undefined && outsideC < d.coldBelowC;
+  const level = typeof seatArg === "number" ? seatArg : d.seatLevel;
+  for (const p of positions) {
+    const s = { endpoint: "remote_seat_heater_request", body: seatHeaterBody(p, level) };
+    if (typeof seatArg === "number") steps.push(s);
+    else if (seatArg === "auto") {
+      if (outsideC === undefined) conditional.push({ ...s, when: `outside temp below ${d.coldBelowC} C` });
+      else if (cold && level > 0) steps.push(s);
+    }
+  }
+  if (seatArg !== "off" && d.wheelWhenCold && positions.includes(SEATS.driver)) {
+    const s = { endpoint: "remote_steering_wheel_heater_request", body: { on: true } };
+    if (typeof seatArg === "number" && seatArg > 0) steps.push(s);
+    else if (seatArg === "auto") {
+      if (outsideC === undefined) conditional.push({ ...s, when: `outside temp below ${d.coldBelowC} C` });
+      else if (cold) steps.push(s);
+    }
+  }
+  const defrost = { endpoint: "set_preconditioning_max", body: { on: true } };
+  if (defArg === true) steps.push(defrost);
+  else if (defArg === "auto") {
+    if (outsideC === undefined) conditional.push({ ...defrost, when: `outside temp below ${d.defrostBelowC} C` });
+    else if (outsideC < d.defrostBelowC) steps.push(defrost);
+  }
+  return { steps, conditional };
+}
+
+function needsOutsideTemp(args: ToolArgs): boolean {
+  return (args.seat_heat ?? "auto") === "auto" || (args.defrost ?? "auto") === "auto";
+}
+
+type SendOpts = {
+  name: string;
+  scope: string;
+  readBack: string;
+  requireExplicitVin?: boolean;
+  /** Static steps, or a planner that may read cached data first (warm-up). */
+  plan: (vin: string | undefined, ctx: ToolContext) => Promise<Built>;
+  previewPlan: () => Built & { conditional?: Array<Step & { when: string }> };
+};
+
+function requestOf(ctx: ToolContext, vin: string | undefined, s: Step) {
+  const base = ctx.config.proxyUrl ?? "<TESLA_COMMAND_PROXY_URL>";
+  return { method: "POST", url: `${base}/api/1/vehicles/${vin ?? "{vin}"}/command/${s.endpoint}`, body: s.body };
+}
+
+async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promise<Record<string, unknown>> {
+  if (args.confirm !== true) {
+    const p = o.previewPlan();
+    const vin = offlineVin(args, ctx, o.requireExplicitVin);
+    const single = p.steps.length === 1 && !p.conditional?.length;
+    return {
+      dryRun: true,
+      sent: false,
+      command: o.name,
+      ...(single
+        ? { endpoint: `POST /api/1/vehicles/{vin}/command/${p.steps[0].endpoint}`, body: p.preview?.destination ? { destination: p.preview.destination } : p.steps[0].body }
+        : { steps: p.steps.map((s) => ({ endpoint: s.endpoint, body: s.body })), ...(p.conditional?.length ? { conditionalSteps: p.conditional } : {}) }),
+      vinLast4: vin ? vin.slice(-4) : o.requireExplicitVin ? "(explicit vin required)" : "(resolved at send time)",
+      proxyConfigured: Boolean(ctx.config.proxyUrl),
+      checksBeforeSend: ["vehicle online (no auto-wake)", "virtual key paired", "local rate limit"],
+      estimatedBillableCalls: `${p.steps.length + (p.conditional?.length ?? 0)} command(s) max + up to 3 small reads (state, fleet_status, cached data)`,
+      toSend: "Ask the user to confirm, then call again with confirm=true and user_request.",
+    };
+  }
+  requireIntent(args);
+  if (ctx.config.dryRun) {
+    const p = o.previewPlan();
+    const vin = offlineVin(args, ctx, o.requireExplicitVin);
+    if (o.requireExplicitVin && !vin) throw new LocalRefusal("vin_required", "This command needs an explicit vin (no default) because it can open the vehicle.");
+    return {
+      dryRun: true, dryRunMode: "TESLA_FLEET_DRY_RUN", sent: false, command: o.name,
+      wouldSend: p.steps.map((s) => requestOf(ctx, vin, s)),
+      ...(p.conditional?.length ? { conditionalSteps: p.conditional.map((s) => ({ ...requestOf(ctx, vin, s), when: s.when })) } : {}),
+      wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
+      proxyConfigured: Boolean(ctx.config.proxyUrl),
+      note: "Validated only; no network call was made.",
+    };
+  }
+  const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: o.requireExplicitVin });
+  if (!ctx.config.proxyUrl) {
+    throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
+      "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
+  }
+  await ctx.fleet.requireOnline(vin);
+  const fs = await ctx.fleet.fleetStatus(vin);
+  if (fs.paired === false) {
+    throw new LocalRefusal("virtual_key_missing", "This app's virtual key is not paired with the vehicle; nothing was sent.", pairingHint(ctx));
+  }
+  const { steps } = await o.plan(vin, ctx);
+  const done: Array<Record<string, unknown>> = [];
+  const multi = steps.length > 1;
+  for (const s of steps) {
+    try {
+      const r = await ctx.fleet.command(vin, s.endpoint, s.body);
+      const reason = r.reason ?? "";
+      if (r.result === true) { done.push({ endpoint: s.endpoint, ok: true }); continue; }
+      if (BENIGN_COMMAND_REASONS[reason]) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, message: BENIGN_COMMAND_REASONS[reason] }); continue; }
+      const fail = { ok: false, sent: true, command: o.name, vinLast4: vin.slice(-4), reason, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
+      return multi ? { ...fail, failedStep: s.endpoint, completedSteps: done } : fail;
+    } catch (e) {
+      const partial = multi ? { failedStep: s.endpoint, completedSteps: done } : {};
+      if (isTimeout(e) || (e instanceof FleetApiError && e.info.status === 408)) {
+        return {
+          ok: false, sent: "unknown", command: o.name, vinLast4: maskVin(vin).slice(-4), code: "state_unknown",
+          message: "The command may or may not have run (timeout/unavailable). It was not retried.",
+          hint: `Read the state back with ${o.readBack} before doing anything else.`, ...partial,
+        };
+      }
+      const cf = connectFailure(e);
+      if (cf) return { ok: false, sent: false, command: o.name, code: cf.code, error: cf.message, ...partial };
+      if (e instanceof FleetApiError && e.info.code === "virtual_key_missing") throw new FleetApiError({ ...e.info, hint: pairingHint(ctx) });
+      if (e instanceof FleetApiError && e.info.code === "missing_scope") throw new FleetApiError({ ...e.info, hint: scopeHint(o.scope) });
+      if (multi && done.length) return { ok: false, sent: true, command: o.name, error: e instanceof Error ? e.message : String(e), ...partial };
+      throw e;
+    }
+  }
+  const noChange = done.length > 0 && done.every((d) => d.noChange);
+  if (!multi) {
+    const d = done[0];
+    return d.noChange
+      ? { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), noChange: true, reason: d.reason, message: d.message }
+      : { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), readBackWith: o.readBack };
+  }
+  return { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), steps: done, ...(noChange ? { noChange: true } : {}), readBackWith: o.readBack };
+}
+
 function commandTool(spec: CommandSpec): ToolDef {
+  const build = (args: ToolArgs): Built => {
+    const b = spec.build ? spec.build(args) : { body: {} };
+    const endpoint = (b.preview?.endpoint as string | undefined) ?? spec.endpoint;
+    return { steps: [{ endpoint, body: b.body }], preview: b.preview };
+  };
   return {
     kind: "command",
     tool: {
@@ -173,58 +434,55 @@ function commandTool(spec: CommandSpec): ToolDef {
       },
     },
     handler: async (args, ctx) => {
-      const built = spec.build ? spec.build(args) : { body: {} };
-      const endpoint = (built.preview?.endpoint as string | undefined) ?? spec.endpoint;
-      if (args.confirm !== true) {
-        const vin = offlineVin(args, ctx, spec.requireExplicitVin);
-        return {
-          dryRun: true,
-          sent: false,
-          command: spec.name,
-          endpoint: `POST /api/1/vehicles/{vin}/command/${endpoint}`,
-          vinLast4: vin ? vin.slice(-4) : spec.requireExplicitVin ? "(explicit vin required)" : "(resolved at send time)",
-          body: built.preview?.destination ? { destination: built.preview.destination } : built.body,
-          proxyConfigured: Boolean(ctx.config.proxyUrl),
-          checksBeforeSend: ["vehicle online (no auto-wake)", "virtual key paired", "local rate limit"],
-          estimatedBillableCalls: "1 command + up to 2 small reads (state, fleet_status)",
-          toSend: "Ask the user to confirm, then call again with confirm=true and user_request.",
-        };
-      }
-      requireIntent(args);
-      const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: spec.requireExplicitVin });
-      if (!ctx.config.proxyUrl) {
-        throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
-          "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
-      }
-      await ctx.fleet.requireOnline(vin);
-      const fs = await ctx.fleet.fleetStatus(vin);
-      if (fs.paired === false) {
-        throw new LocalRefusal("virtual_key_missing", "This app's virtual key is not paired with the vehicle; nothing was sent.", pairingHint(ctx));
-      }
-      try {
-        const r = await ctx.fleet.command(vin, endpoint, built.body);
-        const reason = r.reason ?? "";
-        if (r.result === true) return { ok: true, sent: true, command: spec.name, vinLast4: vin.slice(-4), readBackWith: spec.readBack };
-        if (BENIGN_COMMAND_REASONS[reason]) {
-          return { ok: true, sent: true, command: spec.name, vinLast4: vin.slice(-4), noChange: true, reason, message: BENIGN_COMMAND_REASONS[reason] };
-        }
-        return { ok: false, sent: true, command: spec.name, vinLast4: vin.slice(-4), reason, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
-      } catch (e) {
-        if (isTimeout(e) || (e instanceof FleetApiError && e.info.status === 408)) {
-          return {
-            ok: false, sent: "unknown", command: spec.name, vinLast4: maskVin(vin).slice(-4), code: "state_unknown",
-            message: "The command may or may not have run (timeout/unavailable). It was not retried.",
-            hint: `Read the state back with ${spec.readBack} before doing anything else.`,
-          };
-        }
-        if (e instanceof FleetApiError && e.info.code === "virtual_key_missing") {
-          throw new FleetApiError({ ...e.info, hint: pairingHint(ctx) });
-        }
-        throw e;
-      }
+      const built = build(args); // validate before anything else
+      return runVehicle(args, ctx, {
+        name: spec.name, scope: spec.scope, readBack: spec.readBack, requireExplicitVin: spec.requireExplicitVin,
+        plan: async () => built, previewPlan: () => built,
+      });
     },
   };
 }
+
+const WARM_UP: ToolDef = {
+  kind: "command",
+  tool: {
+    name: "climate_warm_up",
+    description: "Preset for 'turn on the heat' / 'warm up the car': climate on + both set points to the default temperature; when it is cold outside (cached reading) also the default seat heater(s) and steering wheel heat; max defrost when it is very cold. Every argument is optional; defaults come from TESLA_FLEET_DEFAULT_* / *_OUTSIDE_BELOW_C variables. Several signed commands (scope vehicle_cmds); without confirm=true returns the plan.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...VIN_PROP,
+        temp: { type: "number", description: "Set point for both sides (default from TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C)." },
+        unit: { type: "string", enum: ["C", "F"], description: "Default C." },
+        seat_heat: { description: "auto (default: only when cold), off, or a level 0-3 (always).", oneOf: [{ type: "string", enum: ["auto", "off"] }, { type: "integer", minimum: 0, maximum: 3 }] },
+        seats: { type: "string", enum: ["driver", "front", "none"], description: "Which seats get heat (default from TESLA_FLEET_DEFAULT_HEATED_SEATS)." },
+        defrost: { description: "auto (default: only when very cold), true or false.", oneOf: [{ type: "string", enum: ["auto"] }, { type: "boolean" }] },
+        ...CONFIRM_PROPS,
+      },
+    },
+  },
+  handler: async (args, ctx) => {
+    const preview = planWarmUp(args, ctx); // validates
+    return runVehicle(args, ctx, {
+      name: "climate_warm_up", scope: "vehicle_cmds", readBack: "get_climate",
+      previewPlan: () => preview,
+      plan: async (vin) => {
+        let outside: number | undefined;
+        if (needsOutsideTemp(args) && vin) {
+          try {
+            const { data } = await ctx.fleet.vehicleDataCached(vin);
+            const t = (data.climate_state as Record<string, unknown> | undefined)?.outside_temp;
+            if (typeof t === "number") outside = t;
+          } catch {
+            outside = undefined; // no cached reading: skip the cold-only extras
+          }
+        }
+        const p = planWarmUp(args, ctx, outside ?? Number.POSITIVE_INFINITY);
+        return { steps: p.steps };
+      },
+    });
+  },
+};
 
 const WAKE: ToolDef = {
   kind: "command",
@@ -244,6 +502,14 @@ const WAKE: ToolDef = {
       };
     }
     requireIntent(args);
+    if (ctx.config.dryRun) {
+      const vin = offlineVin(args, ctx);
+      return {
+        dryRun: true, dryRunMode: "TESLA_FLEET_DRY_RUN", sent: false, command: "wake_vehicle",
+        wouldSend: [{ method: "POST", url: `<fleet base>/api/1/vehicles/${vin ?? "{vin}"}/wake_up`, body: {} }],
+        note: "Validated only; no network call was made.",
+      };
+    }
     const vin = await ctx.fleet.resolveVin(args.vin);
     const before = await ctx.fleet.getVehicle(vin, true);
     if (before?.state === "online") return { ok: true, sent: false, vinLast4: vin.slice(-4), state: "online", message: "Already online; no wake sent." };
@@ -255,4 +521,4 @@ const WAKE: ToolDef = {
   },
 };
 
-export const COMMAND_TOOLS: ToolDef[] = [WAKE, ...SPECS.map(commandTool)];
+export const VEHICLE_COMMAND_TOOLS: ToolDef[] = [WAKE, WARM_UP, ...SPECS.map(commandTool)];

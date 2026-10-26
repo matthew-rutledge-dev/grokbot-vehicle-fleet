@@ -67,3 +67,21 @@ test("TESLA_FLEET_CLIENT_ID / TESLA_FLEET_PROXY_URL are aliases; the primary nam
   const c = loadConfig({ TESLA_CLIENT_ID: "${TESLA_CLIENT_ID}", TESLA_FLEET_CLIENT_ID: "alias-id" });
   assert.equal(c.clientId, "alias-id", "an unexpanded placeholder counts as unset, so the alias is used");
 });
+
+test("dry-run flag and climate defaults: opt-in, validated, fall back with a warning", () => {
+  const d = loadConfig({});
+  assert.equal(d.dryRun, false);
+  assert.deepEqual(d.climate, { tempC: 21, seatLevel: 2, seats: "driver", coldBelowC: 5, defrostBelowC: -2, wheelWhenCold: true });
+  const c = loadConfig({
+    TESLA_FLEET_DRY_RUN: "yes", TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C: "20.5", TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL: "1",
+    TESLA_FLEET_DEFAULT_HEATED_SEATS: "none", TESLA_FLEET_COLD_OUTSIDE_BELOW_C: "8", TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C: "0",
+    TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD: "false",
+  });
+  assert.equal(c.dryRun, true);
+  assert.deepEqual(c.climate, { tempC: 20.5, seatLevel: 1, seats: "none", coldBelowC: 8, defrostBelowC: 0, wheelWhenCold: false });
+  const bad = loadConfig({ TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C: "40", TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL: "2.5", TESLA_FLEET_DEFAULT_HEATED_SEATS: "all" });
+  assert.equal(bad.climate.tempC, 21);
+  assert.equal(bad.climate.seatLevel, 2);
+  assert.equal(bad.climate.seats, "driver");
+  assert.equal(bad.warnings.length, 3);
+});

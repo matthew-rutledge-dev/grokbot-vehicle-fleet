@@ -6,7 +6,10 @@
  * Hidden tools are also refused at call time.
  */
 import type { Tool } from "@modelcontextprotocol/sdk/types.js";
-import { COMMAND_TOOLS } from "./tools/commands.js";
+import { VEHICLE_COMMAND_TOOLS } from "./tools/commands.js";
+import { ENERGY_COMMAND_TOOLS } from "./tools/energy-commands.js";
+
+export const COMMAND_TOOLS: ToolDef[] = [...VEHICLE_COMMAND_TOOLS, ...ENERGY_COMMAND_TOOLS];
 import { ENERGY_TOOLS } from "./tools/energy.js";
 import { READ_TOOLS } from "./tools/read.js";
 import type { ToolDef } from "./tools/types.js";

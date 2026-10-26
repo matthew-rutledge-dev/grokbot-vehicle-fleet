@@ -4,7 +4,7 @@
  * Gets the FIRST refresh token for YOUR developer app and writes it to the
  * plugin's token store (mode 0600). Prints no secret values.
  *
- *   1) node scripts/auth-helper.mjs url [--energy]
+ *   1) node scripts/auth-helper.mjs url [--energy] [--commands] [--energy-commands]
  *        Prints the authorize URL (auth.tesla.com) and saves a random state.
  *        Open it, sign in, approve the scopes, and copy the full redirect URL.
  *   2) node scripts/auth-helper.mjs exchange "<full redirect URL or code>"
@@ -19,6 +19,10 @@
  *                         "openid offline_access vehicle_device_data"
  *   TESLA_AUTH_ENERGY     optional; 1/true/yes/on (or `url --energy`) adds the
  *                         read-only energy_device_data scope (Powerwall/solar)
+ *   TESLA_AUTH_COMMANDS   optional; on (or `url --commands`) adds vehicle_cmds and
+ *                         vehicle_charging_cmds (vehicle commands via your proxy)
+ *   TESLA_AUTH_ENERGY_COMMANDS optional; on (or `url --energy-commands`) adds
+ *                         energy_cmds (Powerwall settings) and energy_device_data
  *                         add vehicle_location / vehicle_cmds / vehicle_charging_cmds only if needed
  *   TESLA_FLEET_REGION    optional na|eu|cn (token audience); default na
  *   TESLA_FLEET_BASE_URL  optional explicit audience / base URL
@@ -39,10 +43,17 @@ const REGION_BASE_URLS = {
 const DEFAULT_SCOPES = "openid offline_access vehicle_device_data";
 const ENERGY_SCOPE = "energy_device_data";
 
-/** Requested scopes: TESLA_AUTH_SCOPES or the read-only default, plus energy_device_data when opted in. */
-function scopes(energy) {
+const COMMAND_SCOPES = ["vehicle_cmds", "vehicle_charging_cmds"];
+const ENERGY_COMMAND_SCOPES = [ENERGY_SCOPE, "energy_cmds"];
+const on = (k) => ["1", "true", "yes", "on"].includes((env(k) ?? "").toLowerCase());
+
+/** Requested scopes: TESLA_AUTH_SCOPES or the read-only default, plus opted-in extras. */
+function scopes(opts) {
   const list = (env("TESLA_AUTH_SCOPES") ?? DEFAULT_SCOPES).split(/\s+/).filter(Boolean);
-  if (energy && !list.includes(ENERGY_SCOPE)) list.push(ENERGY_SCOPE);
+  const add = (s) => { if (!list.includes(s)) list.push(s); };
+  if (opts.energy) add(ENERGY_SCOPE);
+  if (opts.commands) COMMAND_SCOPES.forEach(add);
+  if (opts.energyCommands) ENERGY_COMMAND_SCOPES.forEach(add);
   return list.join(" ");
 }
 
@@ -88,7 +99,14 @@ function audience() {
 const statePath = () => path.join(path.dirname(storePath()), "auth-state.json");
 
 async function cmdUrl(flags = []) {
-  const energy = flags.includes("--energy") || ["1", "true", "yes", "on"].includes((env("TESLA_AUTH_ENERGY") ?? "").toLowerCase());
+  const known = ["--energy", "--commands", "--energy-commands"];
+  const unknown = flags.filter((f) => !known.includes(f));
+  if (unknown.length) die(`unknown flag(s): ${unknown.join(" ")} (known: ${known.join(" ")})`);
+  const opts = {
+    energy: flags.includes("--energy") || on("TESLA_AUTH_ENERGY"),
+    commands: flags.includes("--commands") || on("TESLA_AUTH_COMMANDS"),
+    energyCommands: flags.includes("--energy-commands") || on("TESLA_AUTH_ENERGY_COMMANDS"),
+  };
   const clientId = envAlias("TESLA_CLIENT_ID", "TESLA_FLEET_CLIENT_ID") ?? die("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set");
   const redirect = env("TESLA_REDIRECT_URI") ?? die("TESLA_REDIRECT_URI is not set");
   const state = randomBytes(16).toString("hex");
@@ -97,7 +115,7 @@ async function cmdUrl(flags = []) {
   u.searchParams.set("response_type", "code");
   u.searchParams.set("client_id", clientId);
   u.searchParams.set("redirect_uri", redirect);
-  u.searchParams.set("scope", scopes(energy));
+  u.searchParams.set("scope", scopes(opts));
   u.searchParams.set("state", state);
   u.searchParams.set("prompt_missing_scopes", "true");
   console.log("Open this URL, sign in, approve, then copy the full redirect URL:\n");
@@ -160,6 +178,6 @@ const [cmd, arg, ...rest] = process.argv.slice(2);
 if (cmd === "url") await cmdUrl([arg, ...rest].filter(Boolean));
 else if (cmd === "exchange") await cmdExchange(arg);
 else {
-  console.log("usage: node scripts/auth-helper.mjs url [--energy] | exchange \"<redirect URL or code>\"");
+  console.log("usage: node scripts/auth-helper.mjs url [--energy] [--commands] [--energy-commands] | exchange \"<redirect URL or code>\"");
   process.exit(cmd ? 1 : 0);
 }

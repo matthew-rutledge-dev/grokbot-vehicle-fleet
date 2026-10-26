@@ -18,6 +18,9 @@ export const RULES_SUMMARY = [
   "Nothing wakes the vehicle except wake_vehicle (confirm-gated, costs a wake).",
   "Reads default to cached data; live reads only when the vehicle is already online.",
   "Do not poll. Every Fleet API response below 500 is billed.",
+  "Vehicle commands go only through your signing proxy (HTTPS, optional CA pin); never directly. No automatic retries.",
+  "Energy-site commands go directly to the Fleet API and need the energy_cmds scope.",
+  "TESLA_FLEET_DRY_RUN=1 validates confirmed commands and returns the exact request without sending it.",
   "Location is off unless TESLA_FLEET_ENABLE_LOCATION is on, and coarse by default.",
 ];
 
@@ -110,7 +113,9 @@ export const READ_TOOLS: ToolDef[] = [
       auth: ctx.tokens.status(),
       billableCallsThisSession: ctx.fleet.billableCalls,
       rules: RULES_SUMMARY,
-      energy: "Energy sites (Powerwall/solar, Wall Connector via site live_status): read-only tools; need the energy_device_data scope. Energy settings changes are not supported.",
+      dryRunMode: ctx.config.dryRun,
+      climateDefaults: ctx.config.climate,
+      energy: "Energy sites (Powerwall/solar, Wall Connector via site live_status): reads need energy_device_data; settings commands (backup reserve, operation mode, storm mode, grid import/export) need energy_cmds and are hidden unless read-only is off.",
     }),
   },
   {

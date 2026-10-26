@@ -12,11 +12,14 @@
 | local | `bad_history_args` / `bad_site_id` | no | invalid or too-long energy history range, or a non-numeric site id | fix the arguments |
 | local | `site_ambiguous` / `no_energy_sites` | no | several sites, or none visible | pass `energy_site_id`; check the energy scope |
 | local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` (alias `TESLA_FLEET_PROXY_URL`) | configure proxy |
+| local | `proxy_unreachable` | no | proxy refused the connection or the host did not resolve; not sent | start or fix the proxy |
+| local | `proxy_tls_error` | no | proxy certificate not trusted / hostname mismatch; not sent | check `TESLA_COMMAND_PROXY_CA_CERT` and the cert SAN |
+| local | `invalid_arguments` | no | parameter out of range; checked before any network call | fix the value |
 | 401 | `unauthorized` | yes | access token expired | refreshed once automatically |
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |
 | 401 | `mobile_access_disabled` | yes | remote access off in the car | enable in car |
 | 402 | `payment_required` | yes | billing | developer portal |
-| 403 | `missing_scope` | yes | token lacks a scope (energy calls report `missing_energy_scope`) | re-consent with the needed scope |
+| 403 | `missing_scope` | yes | token lacks a scope (energy reads report `missing_energy_scope`, energy commands `missing_energy_cmds_scope`); the hint names the scope | re-consent: `auth-helper.mjs url --commands` (vehicle_cmds, vehicle_charging_cmds) or `--energy-commands` (energy_cmds) |
 | 403 | `forbidden` | yes | refused for another reason (no access to this vehicle/site) | check account access |
 | 403 | `command_protocol_required` | yes | unsigned command | use the proxy |
 | 404 | `not_found` | yes | no cached data / unknown vehicle | `live=true` if online |

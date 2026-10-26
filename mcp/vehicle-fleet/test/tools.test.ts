@@ -26,9 +26,10 @@ test("schema audit: no read tool takes confirm; every command requires confirm +
   }
 });
 
-test("energy tools are read-only reads; no energy write tools exist", () => {
-  const energy = ALL_TOOL_DEFS.filter((d) => /energy/i.test(d.tool.name));
-  assert.deepEqual(energy.map((d) => d.tool.name).sort(), ["get_energy_history", "get_energy_live_status", "get_energy_site_info", "list_energy_sites"]);
-  assert.ok(energy.every((d) => d.kind === "read"));
-  assert.ok(!ALL_TOOL_DEFS.some((d) => /backup_reserve|operation_mode|storm_mode|grid_import|export_rule/i.test(d.tool.name)));
+test("energy reads are reads; energy writes are command tools (hidden, confirm-gated)", () => {
+  const reads = ALL_TOOL_DEFS.filter((d) => d.kind === "read" && /energy/i.test(d.tool.name));
+  assert.deepEqual(reads.map((d) => d.tool.name).sort(), ["get_energy_history", "get_energy_live_status", "get_energy_site_info", "list_energy_sites"]);
+  const writes = ALL_TOOL_DEFS.filter((d) => /backup_reserve|operation_mode|storm_mode|grid_import|export_rule/i.test(d.tool.name));
+  assert.deepEqual(writes.map((d) => d.tool.name).sort(), ["set_backup_reserve", "set_grid_import_export", "set_operation_mode", "set_storm_mode"]);
+  assert.ok(writes.every((d) => d.kind === "command" && COMMAND_TOOL_NAMES.has(d.tool.name)));
 });
