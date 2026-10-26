@@ -15,7 +15,7 @@ const products: Route = () => ({
 const live: Route = () => ({
   status: 200,
   body: { response: {
-    solar_power: 1200, battery_power: -500, load_power: 700, grid_power: 0, percentage_charged: 55.5,
+    solar_power: 1200, battery_power: -500, load_power: 700, grid_power: 0, percentage_charged: 55.54871654268362,
     island_status: "on_grid", grid_status: "Active", storm_mode_active: false, timestamp: "2026-01-01T12:00:00-05:00",
     wall_connectors: [{ din: "WC-EXAMPLE-0001", vin: VIN, wall_connector_state: 2, wall_connector_fault_state: 2, wall_connector_power: 0, extra_field: "dropped" }],
   } },
@@ -62,6 +62,8 @@ test("live status: power flows plus Wall Connector fields; site resolved once fr
   assert.equal(b.ok, true);
   assert.equal(b.solar_power, 1200);
   assert.equal(b.island_status, "on_grid");
+  assert.equal(b.percentage_charged, 55.5, "rounded to one decimal");
+  assert.match(String(b.signs), /discharging/);
   const wc = (b.wall_connectors as Array<Record<string, unknown>>)[0];
   assert.equal(wc.wall_connector_state, 2);
   assert.equal(wc.vin, VIN);

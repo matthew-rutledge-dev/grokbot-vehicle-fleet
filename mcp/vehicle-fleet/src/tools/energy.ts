@@ -45,6 +45,14 @@ export const SITE_COMPONENT_FIELDS = [
 
 export const USER_SETTINGS_FIELDS = ["storm_mode_enabled", "off_grid_vehicle_charging_enabled", "sync_grid_alert_enabled"] as const;
 
+/** Round battery percentages (the API returns long floats) to one decimal. */
+export function roundPct<T extends Record<string, unknown>>(o: T): T {
+  if (typeof o.percentage_charged === "number") (o as Record<string, unknown>).percentage_charged = Math.round(o.percentage_charged * 10) / 10;
+  return o;
+}
+
+export const POWER_SIGNS = "battery_power > 0 = battery discharging, < 0 = charging; grid_power > 0 = importing from grid, < 0 = exporting; solar_power and load_power are >= 0.";
+
 const SCOPE_HINT = `Energy tools need the ${ENERGY_SCOPE} scope. Re-run the auth helper with energy enabled (node scripts/auth-helper.mjs url --energy) and sign in once more.`;
 
 /** Turn a 403 into a clear missing-scope refusal; rethrow everything else. */
@@ -152,7 +160,7 @@ export const ENERGY_TOOLS: ToolDef[] = [
       const sites = await ctx.fleet.listEnergySites(true);
       return {
         ok: true,
-        sites: sites.map((s) => ({ energy_site_id: String(s.energy_site_id), ...pick(s, PRODUCT_FIELDS), components: pick(s.components, ["battery", "solar", "grid"]) })),
+        sites: sites.map((s) => ({ energy_site_id: String(s.energy_site_id), ...roundPct(pick(s, PRODUCT_FIELDS)), components: pick(s.components, ["battery", "solar", "grid"]) })),
         note: sites.length ? undefined : `No energy sites returned. If you have one, the token probably lacks ${ENERGY_SCOPE}. ${SCOPE_HINT}`,
       };
     }),
@@ -173,7 +181,8 @@ export const ENERGY_TOOLS: ToolDef[] = [
         servedFromMemorySec: ageSec,
         timestamp: typeof data.timestamp === "string" ? data.timestamp : undefined,
         unit: "W (power), Wh (energy)",
-        ...pick(data, LIVE_STATUS_FIELDS),
+        signs: POWER_SIGNS,
+        ...roundPct(pick(data, LIVE_STATUS_FIELDS)),
         wall_connectors: wcs.map((w) => pick(w, WALL_CONNECTOR_FIELDS)),
       };
     }),
