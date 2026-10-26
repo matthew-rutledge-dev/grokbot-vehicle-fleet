@@ -60,7 +60,7 @@ async function withScopeHint<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
-    if (e instanceof FleetApiError && e.info.status === 403) {
+    if (e instanceof FleetApiError && e.info.status === 403 && e.info.code === "missing_scope") {
       throw new LocalRefusal("missing_energy_scope", "Tesla refused the energy request (403): the token probably lacks the energy scope.", SCOPE_HINT);
     }
     throw e;

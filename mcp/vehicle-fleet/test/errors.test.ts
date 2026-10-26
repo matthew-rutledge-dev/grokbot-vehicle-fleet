@@ -9,6 +9,8 @@ test("status mapping", () => {
   assert.equal(c(401, { error: "mobile_access_disabled" }).code, "mobile_access_disabled");
   assert.equal(c(401).code, "unauthorized");
   assert.equal(c(403, { error: "Tesla Vehicle Command Protocol required" }).code, "command_protocol_required");
+  assert.equal(c(403, { error: "unauthorized_missing_scopes", error_description: "Unauthorized missing scopes" }).code, "missing_scope");
+  assert.equal(c(403, { error: "forbidden" }).code, "forbidden");
   assert.equal(c(408).code, "vehicle_unavailable");
   assert.equal(c(408).billed, true);
   assert.equal(c(412, { error: "Unregistered account" }).code, "partner_not_registered");

@@ -248,13 +248,19 @@ export class FleetClient {
   /** Site id: explicit > TESLA_DEFAULT_ENERGY_SITE_ID > the only energy site on the account. */
   async resolveSiteId(id: unknown): Promise<string> {
     const clean = (v: string) => {
-      if (!/^\d{1,20}$/.test(v)) throw new LocalRefusal("bad_site_id", "energy_site_id must be digits only (e.g. 1234567890).");
+      if (!/^\d{1,20}$/.test(v)) throw new LocalRefusal("bad_site_id", "energy_site_id must be a string of digits (e.g. \"1234567890\").");
       return v;
     };
-    if ((typeof id === "string" && id.trim()) || typeof id === "number") return clean(String(id).trim());
+    if (id !== undefined && id !== null && typeof id !== "string") {
+      throw new LocalRefusal("bad_site_id", "energy_site_id must be a string of digits (e.g. \"1234567890\"), not a number.");
+    }
+    if (typeof id === "string" && id.trim()) return clean(id.trim());
     if (this.config.defaultEnergySiteId) return clean(this.config.defaultEnergySiteId);
     const sites = await this.listEnergySites(false);
     const ids = [...new Set(sites.map((s) => String(s.energy_site_id)))];
+    if (sites.some((s) => typeof s.energy_site_id === "number" && !Number.isSafeInteger(s.energy_site_id))) {
+      throw new LocalRefusal("bad_site_id", "An energy_site_id from the API is too large to handle exactly; set TESLA_DEFAULT_ENERGY_SITE_ID to the id as a string.");
+    }
     if (ids.length === 1) return ids[0];
     if (ids.length === 0) throw new LocalRefusal("no_energy_sites", "No energy sites on this account (or the token lacks energy_device_data).");
     throw new LocalRefusal("site_ambiguous", "More than one energy site; pass energy_site_id.", undefined, {

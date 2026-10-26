@@ -15,7 +15,7 @@ const products: Route = () => ({
 const live: Route = () => ({
   status: 200,
   body: { response: {
-    solar_power: 1200, battery_power: -500, load_power: 700, grid_power: 0, percentage_charged: 55.54871654268362,
+    solar_power: 1200, battery_power: -500, load_power: 700, grid_power: 0, percentage_charged: 55.57,
     island_status: "on_grid", grid_status: "Active", storm_mode_active: false, timestamp: "2026-01-01T12:00:00-05:00",
     wall_connectors: [{ din: "WC-EXAMPLE-0001", vin: VIN, wall_connector_state: 2, wall_connector_fault_state: 2, wall_connector_power: 0, extra_field: "dropped" }],
   } },
@@ -62,7 +62,7 @@ test("live status: power flows plus Wall Connector fields; site resolved once fr
   assert.equal(b.ok, true);
   assert.equal(b.solar_power, 1200);
   assert.equal(b.island_status, "on_grid");
-  assert.equal(b.percentage_charged, 55.5, "rounded to one decimal");
+  assert.equal(b.percentage_charged, 55.6, "rounded to one decimal");
   assert.match(String(b.signs), /discharging/);
   const wc = (b.wall_connectors as Array<Record<string, unknown>>)[0];
   assert.equal(wc.wall_connector_state, 2);
@@ -97,6 +97,40 @@ test("default site id skips the products call; bad id refused locally", async ()
   assert.equal(isError(res), true);
   assert.equal(body(res).code, "bad_site_id");
   assert.equal(calls.length, n);
+});
+
+test("403 for an unrelated reason stays a generic forbidden error", async () => {
+  const { ctx } = setup(baseEnv({ TESLA_DEFAULT_ENERGY_SITE_ID: SITE }), energyRoutes({
+    [`GET ${BASE}/api/1/energy_sites/${SITE}/live_status`]: () => ({ status: 403, body: { error: "forbidden", error_description: "user does not have access to this site" } }),
+  }));
+  const c = await connect(ctx);
+  const res = await c.callTool({ name: "get_energy_live_status", arguments: {} });
+  assert.equal(isError(res), true);
+  assert.equal(body(res).code, "forbidden");
+});
+
+test("site id must be a digit string: numbers and junk refused before any call", async () => {
+  const { ctx, calls } = setup(baseEnv(), energyRoutes());
+  const c = await connect(ctx);
+  for (const bad of [1234567890, 9007199254740993, "12ab", "-1", ""]) {
+    const res = await c.callTool({ name: "get_energy_site_info", arguments: { energy_site_id: bad } });
+    if (bad === "") continue; // empty string = not given -> falls back to the products list
+    assert.equal(isError(res), true, String(bad));
+    assert.equal(body(res).code, "bad_site_id", String(bad));
+  }
+  assert.equal(calls.filter((x) => x.url.includes("/site_info")).length, 1, "only the empty-string fallback reached site_info");
+  const ok = body(await c.callTool({ name: "get_energy_site_info", arguments: { energy_site_id: SITE } }));
+  assert.equal(ok.energy_site_id, SITE);
+});
+
+test("unsafe numeric site id from the API is refused, not rounded", async () => {
+  const { ctx } = setup(baseEnv(), energyRoutes({
+    [`GET ${BASE}/api/1/products`]: () => ({ status: 200, body: "{\"response\":[{\"energy_site_id\":9007199254740993,\"resource_type\":\"battery\"}]}" }),
+  }));
+  const c = await connect(ctx);
+  const res = await c.callTool({ name: "get_energy_live_status", arguments: {} });
+  assert.equal(isError(res), true);
+  assert.equal(body(res).code, "bad_site_id");
 });
 
 test("403 gives a missing-scope hint", async () => {

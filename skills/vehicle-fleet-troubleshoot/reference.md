@@ -16,7 +16,8 @@
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |
 | 401 | `mobile_access_disabled` | yes | remote access off in the car | enable in car |
 | 402 | `payment_required` | yes | billing | developer portal |
-| 403 | `forbidden` | yes | missing scope | re-consent with the needed scope |
+| 403 | `missing_scope` | yes | token lacks a scope (energy calls report `missing_energy_scope`) | re-consent with the needed scope |
+| 403 | `forbidden` | yes | refused for another reason (no access to this vehicle/site) | check account access |
 | 403 | `command_protocol_required` | yes | unsigned command | use the proxy |
 | 404 | `not_found` | yes | no cached data / unknown vehicle | `live=true` if online |
 | 408 | `vehicle_unavailable` | yes | asleep/offline/poor signal | later; do not loop |
