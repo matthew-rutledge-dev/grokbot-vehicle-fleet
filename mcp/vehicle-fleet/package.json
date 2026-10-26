@@ -1,11 +1,13 @@
 {
   "name": "vehicle-fleet-mcp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "MCP server: vehicle status reads (cached-first, never auto-wake) and confirm-gated commands via the Fleet API and your own command proxy. Read-only unless TESLA_FLEET_READ_ONLY is explicitly off.",
   "license": "MIT",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22.19"
+  },
   "scripts": {
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.json",
@@ -15,12 +17,12 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "undici": "^6.21.0"
+    "undici": "^8.12.3"
   },
   "devDependencies": {
-    "@types/node": "^22.13.10",
+    "@types/node": "^26.6.5",
     "tsx": "^4.19.3",
-    "typescript": "^5.8.2"
+    "typescript": "^7.0.2"
   },
   "main": "dist/index.js"
 }

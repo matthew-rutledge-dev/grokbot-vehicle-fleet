@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1 (unreleased)
+
+Dependency updates.
+
+- undici 8, TypeScript 7, @types/node 26.
+- Node.js 22.19 or newer is now required (`engines` `>=22.19`; undici 8 needs it).
+- README: dependency policy (latest versions, majors when CI passes, pins only with a stated reason, bump `engines` with dependencies).
+
 ## 0.2.0 (unreleased)
 
 Energy-site reads (Powerwall / solar; Wall Connector via site live status). Read-only; no energy commands.
