@@ -26,4 +26,4 @@
 
 \* the state check itself is one small read.
 
-Server will not start: run `scripts/bootstrap-mcp.sh` (builds `dist/index.js`), check Node 20+, then reload MCP servers.
+Server will not start: run `scripts/bootstrap-mcp.sh` (builds `dist/index.js`), check Node 22+, then reload MCP servers.

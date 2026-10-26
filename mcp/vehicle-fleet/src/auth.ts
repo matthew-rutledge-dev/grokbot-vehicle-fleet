@@ -24,6 +24,8 @@ type TokenResponse = { access_token?: string; refresh_token?: string; expires_in
 export class TokenManager {
   private access?: { token: string; exp: number };
   private refreshing?: Promise<string>;
+  /** Refresh tokens this process has held (spent + rotated); for output redaction only. */
+  private readonly knownRefresh = new Set<string>();
 
   constructor(
     private readonly config: Config,
@@ -62,6 +64,23 @@ export class TokenManager {
     } catch {
       return undefined;
     }
+  }
+
+  /**
+   * Every secret value this manager knows at runtime: the in-memory access
+   * token, the refresh token currently in the store, and any refresh token
+   * spent or rotated in this process. Used only to redact tool output.
+   */
+  secretValues(): string[] {
+    const out = new Set<string>(this.knownRefresh);
+    if (this.access) out.add(this.access.token);
+    try {
+      const stored = this.store.read()?.refresh_token;
+      if (stored) out.add(stored);
+    } catch {
+      /* unreadable store: nothing more to add */
+    }
+    return [...out];
   }
 
   /** Non-secret status for describe_boundary. */
@@ -110,6 +129,7 @@ export class TokenManager {
 
       this.limiter.take("auth");
       const used = data.refresh_token;
+      this.knownRefresh.add(used);
       let tok: TokenResponse;
       try {
         const res = await this.http.request(
@@ -130,6 +150,7 @@ export class TokenManager {
       if (!tok.access_token) throw new Error("token response had no access_token");
 
       const next = tok.refresh_token ?? used;
+      this.knownRefresh.add(next);
       if (next !== used) seen.add(sha256(used));
       // Persist the rotated refresh token BEFORE using the new access token.
       this.store.write({

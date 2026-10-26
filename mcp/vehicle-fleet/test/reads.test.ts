@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BASE, VIN, baseEnv, body, connect, isError, setup } from "./helpers.js";
+import { BASE, SEED, VIN, baseEnv, body, connect, isError, setup } from "./helpers.js";
 
 const wakeCalls = (calls: Array<{ url: string }>) => calls.filter((c) => c.url.includes("wake_up"));
 
@@ -105,4 +105,20 @@ test("describe_boundary echoes no secret values", async () => {
   assert.equal(calls.length, 0);
   const text = JSON.stringify(b);
   for (const v of [env.TESLA_REFRESH_TOKEN, env.TESLA_CLIENT_ID]) assert.ok(!text.includes(v), "no secret echoed");
+});
+
+test("error output redacts the rotated refresh token and access token, not just the env seed", async () => {
+  const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }), {
+    [`GET ${BASE}/api/1/vehicles`]: () => ({
+      status: 400,
+      body: { error: "invalid_request", error_description: `echo ${SEED} rotated-EXAMPLE-1 access-EXAMPLE-1 end` },
+    }),
+  });
+  const c = await connect(ctx);
+  const res = await c.callTool({ name: "list_vehicles", arguments: {} });
+  assert.equal(isError(res), true);
+  const text = JSON.stringify(body(res));
+  assert.ok(ctx.tokens.secretValues().includes("rotated-EXAMPLE-1"), "store now holds the rotated token");
+  for (const s of [SEED, "rotated-EXAMPLE-1", "access-EXAMPLE-1"]) assert.ok(!text.includes(s), `redacted: ${s}`);
+  assert.ok(text.includes("[redacted]"));
 });

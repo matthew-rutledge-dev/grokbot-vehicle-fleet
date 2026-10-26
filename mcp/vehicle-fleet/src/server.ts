@@ -46,7 +46,7 @@ export function buildContext(deps: ServerDeps = {}): ToolContext {
 
 export function createServer(ctx: ToolContext): Server {
   const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled };
-  const secrets = () => [ctx.config.refreshTokenSeed];
+  const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues()];
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listTools(mode) }));
