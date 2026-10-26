@@ -168,11 +168,12 @@ npm run typecheck
 npm test     # builds, then unit tests + MCP stdio smoke against local fakes (no real API calls)
 ```
 
-CI runs the same on ubuntu-latest and windows-latest (Node 22 and 24), with no secrets. Requires Node 22.19 or newer (undici 8 needs it).
+CI runs the same on ubuntu-latest and windows-latest (Node 22.19.0, latest 22 and 24), with no secrets. Requires Node 22.19 or newer (undici 8 needs it).
 
 ## Dependency policy
 
 - Use the latest versions of dependencies, GitHub Actions and runtimes.
+- `@types/node` tracks the latest Node; CI also runs on the exact `engines` minimum (22.19.0), so any use of a newer-only API fails there at runtime.
 - Take major updates when CI passes; fix the code if a major update needs it rather than holding back.
 - Pin a version only with a stated reason next to the pin (for example a workflow that handles secrets or has write access, or a known regression).
 - When a dependency raises its minimum runtime, bump `engines` and the documented minimum in the same change.

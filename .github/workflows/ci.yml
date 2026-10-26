@@ -21,7 +21,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        node: [22, 24]
+        # 22.19.0 = the exact engines minimum (catches newer-only APIs); 22 and 24 = latest of each line.
+        node: ["22.19.0", 22, 24]
     defaults:
       run:
         working-directory: mcp/vehicle-fleet

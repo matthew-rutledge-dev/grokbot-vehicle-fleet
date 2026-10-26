@@ -36,6 +36,13 @@ if ! command -v node >/dev/null 2>&1; then
   exit 1
 fi
 
+# Warn (do not fail) below the engines minimum.
+MIN_NODE="22.19.0"
+NODE_VER="$(node -p 'process.versions.node' 2>/dev/null || echo 0.0.0)"
+if ! node -e 'const [a,b]=process.argv.slice(1).map(v=>v.split(".").map(Number));for(let i=0;i<3;i++){if((a[i]||0)!==(b[i]||0))process.exit((a[i]||0)>(b[i]||0)?0:1)}' "$NODE_VER" "$MIN_NODE"; then
+  echo "bootstrap-mcp: warning: Node $NODE_VER is older than the required $MIN_NODE; install a current Node 22 or 24 LTS" >&2
+fi
+
 pkg=vehicle-fleet
 dir="$ROOT/mcp/$pkg"
 if [[ ! -f "$dir/package.json" ]]; then

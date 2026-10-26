@@ -102,7 +102,7 @@ export class TokenManager {
 
   private async refresh(): Promise<string> {
     const clientId = this.config.clientId;
-    if (!clientId) throw new LocalRefusal("not_configured", "TESLA_CLIENT_ID is not set.", "Set the plugin variable.");
+    if (!clientId) throw new LocalRefusal("not_configured", "TESLA_CLIENT_ID (or its alias TESLA_FLEET_CLIENT_ID) is not set.", "Set the plugin variable TESLA_CLIENT_ID, or export TESLA_FLEET_CLIENT_ID from your env loader (the auth helper also accepts TESLA_FLEET_CLIENT_SECRET for TESLA_CLIENT_SECRET).");
 
     return this.store.withLock(async () => {
       const data: StoredTokens = this.store.read() ?? { version: 1 };
