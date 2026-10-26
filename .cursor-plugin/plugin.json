@@ -33,6 +33,11 @@
         "title": "Client ID",
         "description": "Required. YOUR developer app's client ID (developer portal). Each installer uses their own app; credentials are never shared."
       },
+      "TESLA_FLEET_CLIENT_ID": {
+        "type": "string",
+        "title": "Client ID (alias)",
+        "description": "Optional alias for TESLA_CLIENT_ID, for env loaders that already export this name. Used only when TESLA_CLIENT_ID is unset."
+      },
       "TESLA_REFRESH_TOKEN": {
         "type": "string",
         "title": "Refresh token (seed)",
@@ -42,6 +47,11 @@
         "type": "string",
         "title": "Client secret",
         "description": "Optional. Used only by the operator-run scripts/auth-helper.mjs for the first code exchange; not passed to the MCP server. Never commit."
+      },
+      "TESLA_FLEET_CLIENT_SECRET": {
+        "type": "string",
+        "title": "Client secret (alias)",
+        "description": "Optional alias for TESLA_CLIENT_SECRET (auth helper only; not used by the MCP server). Used only when TESLA_CLIENT_SECRET is unset. Never commit."
       },
       "TESLA_FLEET_REGION": {
         "type": "string",
@@ -57,6 +67,11 @@
         "type": "string",
         "title": "Command proxy URL",
         "description": "Optional. YOUR tesla-http-proxy base URL, e.g. https://proxy.example.com:4443. Without it, command tools refuse and send nothing."
+      },
+      "TESLA_FLEET_PROXY_URL": {
+        "type": "string",
+        "title": "Command proxy URL (alias)",
+        "description": "Optional alias for TESLA_COMMAND_PROXY_URL. Used only when TESLA_COMMAND_PROXY_URL is unset."
       },
       "TESLA_COMMAND_PROXY_CA_CERT": {
         "type": "string",
