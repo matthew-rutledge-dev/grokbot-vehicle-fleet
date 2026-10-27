@@ -5,8 +5,8 @@ import { describeReadOnly } from "../readonly.js";
 import { maskVin, roundCoord } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import {
-  CHARGE_FIELDS, CLIMATE_FIELDS, CLOSURE_FIELDS, TIRE_FIELDS,
-  blockTimestamp, closureSummary, pick, tireSummary,
+  CHARGE_FIELDS, CLIMATE_FIELDS, CLOSURE_FIELDS, STATUS_FIELDS, TIRE_FIELDS,
+  blockTimestamp, closureSummary, pick, statusSummary, tireSummary,
 } from "./extract.js";
 import { LIVE_PROP, VIN_PROP } from "./schema.js";
 import type { ToolDef } from "./types.js";
@@ -24,12 +24,14 @@ export const RULES_SUMMARY = [
   "Location is on by default (opt out with TESLA_FLEET_ENABLE_LOCATION=0) and coarse (~1 km) unless precise is asked for.",
 ];
 
-type Section = "charge" | "climate" | "closures" | "tires";
+type Section = "charge" | "climate" | "closures" | "tires" | "status";
+const ALL_SECTIONS: Section[] = ["charge", "climate", "closures", "tires", "status"];
 const SECTION_ENDPOINTS: Record<Section, string[]> = {
   charge: ["charge_state"],
   climate: ["climate_state"],
   closures: ["vehicle_state", "closures_state"],
   tires: ["vehicle_state"],
+  status: ["vehicle_state"],
 };
 
 function shape(section: Section, data: Record<string, unknown>): Record<string, unknown> {
@@ -49,6 +51,10 @@ function shape(section: Section, data: Record<string, unknown>): Record<string, 
     case "tires": {
       const f = pick(data.vehicle_state, TIRE_FIELDS);
       return { timestamp: blockTimestamp(data.vehicle_state), tires: tireSummary(f), unit: "bar (psi added)" };
+    }
+    case "status": {
+      const f = pick(data.vehicle_state, STATUS_FIELDS);
+      return { timestamp: blockTimestamp(data.vehicle_state), ...statusSummary(f) };
     }
   }
 }
@@ -183,12 +189,13 @@ export const READ_TOOLS: ToolDef[] = [
   sectionTool("get_battery_charge", "charge", "Battery level, range, charge limit and charging state"),
   sectionTool("get_climate", "climate", "Cabin/outside temperature, climate on/off, set points, seat/wheel heat"),
   sectionTool("get_closures", "closures", "Locked state, doors, trunks/frunk, windows, sentry mode"),
-  sectionTool("get_tires", "tires", "Tire pressures (TPMS, bar + psi) and warnings"),
+  sectionTool("get_tires", "tires", "Tire pressures (TPMS, bar + psi), psi below the recommended cold pressure, and soft/hard warnings"),
+  sectionTool("get_vehicle_status", "status", "Firmware version, software update available / downloading / installing (version, %), odometer (mi + km) and service mode"),
   {
     kind: "read",
     tool: {
       name: "get_vehicle_snapshot",
-      description: "Several sections in ONE call (cheaper than separate reads): any of charge, climate, closures, tires. Cached by default; live=true only when online. Never wakes.",
+      description: "Several sections in ONE call (cheaper than separate reads): any of charge, climate, closures, tires, status. Cached by default; live=true only when online. Never wakes.",
       inputSchema: {
         type: "object",
         properties: {
@@ -196,14 +203,14 @@ export const READ_TOOLS: ToolDef[] = [
           ...LIVE_PROP,
           sections: {
             type: "array",
-            items: { type: "string", enum: ["charge", "climate", "closures", "tires"] },
-            description: "Default: all four.",
+            items: { type: "string", enum: ALL_SECTIONS },
+            description: "Default: all five.",
           },
         },
       },
     },
     handler: async (args, ctx) => {
-      const allowed: Section[] = ["charge", "climate", "closures", "tires"];
+      const allowed = ALL_SECTIONS;
       const req = Array.isArray(args.sections) ? (args.sections as unknown[]).filter((s): s is Section => allowed.includes(s as Section)) : allowed;
       return readSections(args, ctx, req.length ? req : allowed);
     },

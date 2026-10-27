@@ -42,7 +42,32 @@ export const TIRE_FIELDS = [
   "tpms_rcp_front_value", "tpms_rcp_rear_value",
 ] as const;
 
+/** Firmware, pending software update, odometer, service mode (vehicle_state; names per the Fleet Telemetry field mapping). */
+export const STATUS_FIELDS = ["car_version", "odometer", "service_mode", "software_update"] as const;
+export const SOFTWARE_UPDATE_FIELDS = [
+  "status", "version", "download_perc", "install_perc", "expected_duration_sec", "scheduled_time_ms",
+] as const;
+
 const BAR_TO_PSI = 14.5038;
+const MI_TO_KM = 1.609344;
+
+/** Status section: firmware, update in progress / available, odometer (miles, km added), service mode. */
+export function statusSummary(f: Record<string, unknown>): Record<string, unknown> {
+  const u = pick(f.software_update, SOFTWARE_UPDATE_FIELDS);
+  const version = typeof f.car_version === "string" ? f.car_version.split(" ")[0] : undefined;
+  const odo = typeof f.odometer === "number" ? f.odometer : undefined;
+  const pending = typeof u.version === "string" && u.version.trim() !== "" && u.version.trim() !== version;
+  return {
+    firmware: version,
+    softwareUpdate: Object.keys(u).length ? {
+      ...u,
+      scheduledFor: typeof u.scheduled_time_ms === "number" && u.scheduled_time_ms > 0 ? new Date(u.scheduled_time_ms).toISOString() : undefined,
+      pending,
+    } : undefined,
+    odometer: odo === undefined ? undefined : { mi: Math.round(odo * 10) / 10, km: Math.round(odo * MI_TO_KM * 10) / 10 },
+    serviceMode: f.service_mode,
+  };
+}
 
 /** Closure codes: 0 = closed, anything else = open/ajar. */
 export function closureSummary(f: Record<string, unknown>): Record<string, unknown> {
@@ -58,16 +83,20 @@ export function closureSummary(f: Record<string, unknown>): Record<string, unkno
   };
 }
 
-/** TPMS: pressures are reported in bar; add psi. */
+/** TPMS: pressures are reported in bar; add psi, and psi below the recommended cold pressure when the car reports it. */
 export function tireSummary(f: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const pos of ["fl", "fr", "rl", "rr"]) {
     const bar = f[`tpms_pressure_${pos}`];
+    const rcp = f[pos[0] === "f" ? "tpms_rcp_front_value" : "tpms_rcp_rear_value"];
     out[pos] = {
       bar: typeof bar === "number" ? Math.round(bar * 100) / 100 : null,
       psi: typeof bar === "number" ? Math.round(bar * BAR_TO_PSI * 10) / 10 : null,
       softWarning: f[`tpms_soft_warning_${pos}`],
       hardWarning: f[`tpms_hard_warning_${pos}`],
+      recommendedPsi: typeof rcp === "number" && rcp > 0 ? Math.round(rcp * BAR_TO_PSI * 10) / 10 : undefined,
+      psiBelowRecommended: typeof rcp === "number" && rcp > 0 && typeof bar === "number"
+        ? Math.round((rcp - bar) * BAR_TO_PSI * 10) / 10 : undefined,
       lastSeen: typeof f[`tpms_last_seen_pressure_time_${pos}`] === "number"
         ? new Date((f[`tpms_last_seen_pressure_time_${pos}`] as number) * 1000).toISOString() : undefined,
     };
