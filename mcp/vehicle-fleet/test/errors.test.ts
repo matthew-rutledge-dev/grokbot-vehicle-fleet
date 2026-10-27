@@ -41,3 +41,17 @@ test("normalizeCommandReason strips the proxy prefix, trims and lower-cases", as
   assert.equal(normalizeCommandReason(undefined), "");
   assert.equal(normalizeCommandReason("something else: already_set"), "something else: already_set");
 });
+
+test("noopMessage: only own endpoint and reason keys count; prototype names never do", async () => {
+  const { noopMessage } = await import("../src/errors.js");
+  assert.equal(typeof noopMessage("set_charge_limit", "already_set"), "string");
+  for (const endpoint of ["__proto__", "constructor", "toString", "hasOwnProperty", "prototype"]) {
+    for (const reason of ["already_set", "constructor", "__proto__", "toString", "valueOf", ""]) {
+      assert.equal(noopMessage(endpoint, reason), undefined, `${endpoint}/${reason}`);
+    }
+  }
+  for (const reason of ["__proto__", "constructor", "toString", "hasOwnProperty"]) {
+    assert.equal(noopMessage("set_charge_limit", reason), undefined, reason);
+    assert.equal(noopMessage("charge_start", reason), undefined, reason);
+  }
+});

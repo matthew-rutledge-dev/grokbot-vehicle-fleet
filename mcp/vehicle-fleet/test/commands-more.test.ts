@@ -390,3 +390,23 @@ test("energy command TLS failure points at the Fleet API, not the proxy CA varia
   assert.ok(!/PROXY_CA|command proxy|PROXY_CA_FILE/i.test(text), text);
   assert.match(String(b.error), /Fleet API/);
 });
+
+test("climate_warm_up: a proxy-wrapped rejection after completed steps returns sent 'partial'", async () => {
+  const cold = fixtureData();
+  (cold.climate_state as Record<string, unknown>).outside_temp = 1; // cold, not defrost-cold
+  const { ctx, calls } = setup(baseEnv(ON), {
+    ...cmdRoutes(["auto_conditioning_start", "set_temps"]),
+    [`GET ${BASE}/api/1/vehicles/${VIN}/vehicle_data_cached`]: () => ({ status: 200, body: { response: cold } }),
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/remote_seat_heater_request`]: () => ({ status: 200, body: { response: { result: false, reason: "car could not execute command: user_present" } } }),
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "climate_warm_up", arguments: intent }));
+  assert.equal(b.ok, false);
+  assert.equal(b.sent, "partial");
+  assert.equal(b.failedStepSent, true);
+  assert.equal(b.failedStep, "remote_seat_heater_request");
+  assert.equal(b.reason, "user_present");
+  assert.equal(b.rawReason, "car could not execute command: user_present");
+  assert.deepEqual((b.completedSteps as Array<{ endpoint: string }>).map((s) => s.endpoint), ["auto_conditioning_start", "set_temps"]);
+  assert.equal(cmdCalls(calls).length, 3, "stopped at the rejection; steering wheel step not sent");
+});

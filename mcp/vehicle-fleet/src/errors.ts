@@ -157,6 +157,7 @@ export const REJECTION_REASON_TEXT: Record<string, string> = {
 
 /** No-op message for this command + normalised reason, or undefined (= rejection). */
 export function noopMessage(endpoint: string, reason: string): string | undefined {
+  if (!Object.hasOwn(NOOP_REASONS_BY_COMMAND, endpoint)) return undefined;
   const m = NOOP_REASONS_BY_COMMAND[endpoint];
-  return m && Object.hasOwn(m, reason) ? m[reason] : undefined;
+  return Object.hasOwn(m, reason) ? m[reason] : undefined;
 }
