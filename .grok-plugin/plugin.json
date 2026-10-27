@@ -1,6 +1,6 @@
 {
   "name": "grokbot-vehicle-fleet",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge",
@@ -81,6 +81,11 @@
         "type": "string",
         "title": "Token store path",
         "description": "Optional. Default: GROK_PLUGIN_DATA/tokens.json, else XDG state (Linux/macOS) or LOCALAPPDATA (Windows) under grokbot-vehicle-fleet/. File mode 0600; holds the rotated refresh token only."
+      },
+      "TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE": {
+        "type": "string",
+        "title": "Access-token export file (opt-in)",
+        "description": "Optional, OFF by default. Absolute file path. When set, every new access token (first sign-in and each refresh) is written there as the raw token string (no newline, no refresh token), atomically, mode 0600 (new parent dir 0700). WARNING: the token carries ALL scopes this plugin was granted (including vehicle_cmds and energy_cmds if granted), so anyone who can read the file can act as the plugin until it expires. For trusted local consumers on the same host only. Refused if it is relative or collides with the token store."
       },
       "TESLA_FLEET_READ_ONLY": {
         "type": "string",

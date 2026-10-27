@@ -68,6 +68,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_COMMAND_PROXY_URL` | for commands | Your proxy, e.g. `https://proxy.example.com:4443`. Alias: `TESLA_FLEET_PROXY_URL` |
 | `TESLA_COMMAND_PROXY_CA_CERT` | for a private CA / self-signed proxy cert | Path to the PEM to trust for the proxy only. TLS verification is never disabled. Alias: `TESLA_FLEET_PROXY_CA_FILE` |
 | `TESLA_TOKEN_STORE` | no | Token store path (default below) |
+| `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE` | no | **Opt-in, off by default.** Absolute path that receives each new access token for trusted local consumers. The token carries **all** granted scopes - read [Access-token export](#access-token-export-opt-in) first |
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
 | `TESLA_FLEET_ENABLE_LOCATION` | no | Location is **on by default**. `0`/`false`/`no`/`off` hides and refuses `get_location`. Any other value = **off**, one warning on stderr (see below) |
 | `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` | no | `coarse` (default) or `precise`: `get_location` precision when the call does not pass one |
@@ -179,6 +180,22 @@ Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, va
 - Default path: `$GROK_PLUGIN_DATA/tokens.json` when the host sets it; otherwise `${XDG_STATE_HOME:-~/.local/state}/grokbot-vehicle-fleet/tokens.json` (Windows: `%LOCALAPPDATA%\grokbot-vehicle-fleet\tokens.json`).
 - A `TESLA_REFRESH_TOKEN` value is adopted only if it has not been seen before (first run or a fresh re-consent).
 
+### Access-token export (opt-in)
+
+> **Warning.** The exported token is the plugin's own access token. It carries **every scope the plugin was granted**, including `vehicle_cmds`, `vehicle_charging_cmds` and `energy_cmds` if you granted them. Anyone who can read that file can act as the plugin until the token expires (about 8 h), and a new token is written on every refresh. **Energy-site commands need no proxy signing**, so with `energy_cmds` granted, a reader of the file could change Powerwall settings directly. Read-only mode, `confirm=true` and dry-run protect only this server's tools; they do not limit what the token itself can do.
+
+Use it only for **trusted local consumers on the same host** (for example a read-only poller that must not run its own refresh, because refresh tokens are single use and two refreshers would race and both end up at `login_required`). For a consumer that only needs reads, prefer a **separate read-only sign-in** with a second token store and only the scopes it needs (e.g. `openid offline_access energy_device_data`), and give that consumer its own export file.
+
+- **Off by default.** Unset or empty (or an unexpanded `${...}` placeholder) means nothing is written.
+- Set `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE` to an **absolute** file path, e.g. `<state-dir>/grokbot-vehicle-fleet/access-token`.
+- On every successful token acquisition or refresh the file is replaced with the **raw access token string only**: no newline, no JSON, never the refresh token. The write is atomic (temp file in the same directory, fsync, rename), mode `0600`; a missing parent directory is created with mode `0700`.
+- **Refused** (export stays off, one warning on stderr, the server keeps serving) when the path is relative, ends in a path separator, or equals or sits inside the token store, its `.lock` file or `usage.json`.
+- A failed write is warned about **once** (error code only) and the server carries on; the next refresh tries again.
+- The token and the export path are never logged or returned by a tool. `describe_boundary` shows only `accessTokenExport: on/off`.
+- Consumers should re-read the file before each use (or after a `401`), since it changes on every refresh.
+- **Windows:** the write is best effort. No ACLs are set; the file inherits the parent directory's ACL, and the `0600`/`0700` modes are not enforced. Put the file under your own profile (e.g. `%LOCALAPPDATA%`), not a shared folder.
+- To stop exporting, unset the variable, reload, and delete the file.
+
 ## Network endpoints
 
 | Endpoint | When |
@@ -192,7 +209,7 @@ No other endpoints, no telemetry, no analytics.
 
 ## Privacy
 
-- The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only files it writes are the token store and the usage counter (`usage.json`, totals only).
+- The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only files it writes are the token store, the usage counter (`usage.json`, totals only) and, only if you opt in, the access-token export file.
 - Location is on by default (opt out with `TESLA_FLEET_ENABLE_LOCATION=0`), coarse unless precise is asked for, never written to disk. The vehicle shows a location-sharing indicator when location is read.
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.

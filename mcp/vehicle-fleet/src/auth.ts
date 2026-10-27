@@ -7,6 +7,8 @@
  * - Refresh tokens are single use (3-month life; previous valid 24 h), so the
  *   rotated token is persisted atomically, under a lock, BEFORE the new access
  *   token is used.
+ * - Opt-in: TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE also writes each new access token
+ *   (raw string, 0600, atomic) for trusted local consumers. Off by default.
  * - TESLA_REFRESH_TOKEN seeds the store only when its hash has not been seen
  *   before (first run, or the operator pasted a fresh token after re-consent).
  */
@@ -14,6 +16,7 @@ import type { Config } from "./config.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
 import type { Http } from "./http.js";
 import type { RateLimiter } from "./ratelimit.js";
+import { AccessTokenExporter } from "./tokenexport.js";
 import { sha256, type StoredTokens, type TokenStore } from "./tokenstore.js";
 
 export const REFRESH_BUFFER_MS = 60_000;
@@ -33,6 +36,7 @@ export class TokenManager {
     private readonly http: Http,
     private readonly limiter: RateLimiter,
     private readonly now: () => number = Date.now,
+    private readonly exporter: AccessTokenExporter = new AccessTokenExporter(config.accessTokenExportPath),
   ) {}
 
   async getAccessToken(): Promise<string> {
@@ -97,6 +101,7 @@ export class TokenManager {
       refreshTokenStored: Boolean(data?.refresh_token),
       needsReauth: Boolean(data?.needs_reauth),
       accessTokenInMemory: Boolean(this.access),
+      accessTokenExport: this.exporter.enabled ? "on" : "off",
     };
   }
 
@@ -161,6 +166,8 @@ export class TokenManager {
         needs_reauth: false,
       });
       this.access = { token: tok.access_token, exp: this.now() + (tok.expires_in ?? 3600) * 1000 };
+      // Opt-in export for trusted local consumers (off unless TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE is set).
+      this.exporter.write(tok.access_token);
       return tok.access_token;
     });
   }

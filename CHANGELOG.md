@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3 (unreleased)
+
+- New, opt-in and **off by default**: `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE`. When set to an absolute path, every new access token (first acquisition and each refresh) is written there as the raw token string (no newline, no JSON, never the refresh token), atomically (temp + fsync + rename), mode `0600`, with a missing parent directory created `0700`. Meant for trusted local consumers on the same host that must not run their own refresh. A relative path, or one that equals or sits inside the token store, its lock file or `usage.json`, is refused with a warning and the server keeps serving; a failed write warns once and continues. The token and path are never logged or returned; `describe_boundary` shows `accessTokenExport: on/off`. Windows: best effort, no ACLs set.
+- Docs: a loud warning that the exported token carries all granted scopes (including `vehicle_cmds` / `energy_cmds` if granted; energy commands need no proxy signing), and a recommendation to use a separate read-only sign-in for read-only consumers.
+
 ## 0.3.2 (unreleased)
 
 - Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased); the original text is kept in `rawReason`. The `vcsec could not execute command:` prefix is deliberately not stripped (stays a rejection).
