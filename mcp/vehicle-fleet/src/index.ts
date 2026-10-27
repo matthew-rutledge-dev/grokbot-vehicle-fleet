@@ -3,7 +3,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { ToolContext } from "./context.js";
 import { redactSecrets } from "./redact.js";
-import { buildContext, createServer } from "./server.js";
+import { buildContext, createServer, startTokenKeepFresh } from "./server.js";
 
 let ctx: ToolContext | undefined;
 
@@ -24,6 +24,8 @@ async function main() {
   ctx = buildContext();
   for (const w of ctx.config.warnings) logErr(w);
   await createServer(ctx).connect(new StdioServerTransport());
+  // Opt-in access-token export only; nothing is scheduled when it is off.
+  startTokenKeepFresh(ctx, { warn: logErr });
 }
 
 main().catch((err) => {

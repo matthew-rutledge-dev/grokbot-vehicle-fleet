@@ -85,7 +85,7 @@
       "TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE": {
         "type": "string",
         "title": "Access-token export file (opt-in)",
-        "description": "Optional, OFF by default. Absolute file path. When set, every new access token (first sign-in and each refresh) is written there as the raw token string (no newline, no refresh token), atomically, mode 0600 (new parent dir 0700). WARNING: the token carries ALL scopes this plugin was granted (including vehicle_cmds and energy_cmds if granted), so anyone who can read the file can act as the plugin until it expires. For trusted local consumers on the same host only. Refused if it is relative or collides with the token store."
+        "description": "Optional, OFF by default. Absolute file path (Windows: drive letter or UNC). While the MCP server runs, it refreshes the access token at startup and about 10 min before each expiry, and writes the raw token string there (no newline, never the refresh token), atomically, mode 0600 (new parent dir 0700). The auth helper does not write it. When the server stops, the file expires within about 8 h. WARNING: the token carries ALL scopes this plugin was granted: vehicle data, full-precision location (regardless of TESLA_FLEET_ENABLE_LOCATION or coarse rounding), and vehicle_cmds / energy_cmds if granted. Anyone who can read the file can act as the plugin. Trusted local consumers on the same host only; never /tmp or a shared or synced folder. Refused if it is relative or resolves to the token store, its lock file or usage.json."
       },
       "TESLA_FLEET_READ_ONLY": {
         "type": "string",

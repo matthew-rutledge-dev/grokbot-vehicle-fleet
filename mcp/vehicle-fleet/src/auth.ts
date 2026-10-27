@@ -36,17 +36,48 @@ export class TokenManager {
     private readonly http: Http,
     private readonly limiter: RateLimiter,
     private readonly now: () => number = Date.now,
-    private readonly exporter: AccessTokenExporter = new AccessTokenExporter(config.accessTokenExportPath),
+    private readonly exporter: AccessTokenExporter = new AccessTokenExporter(config.accessTokenExportPath, undefined, config.tokenStorePath),
   ) {}
 
   async getAccessToken(): Promise<string> {
     if (this.access && this.now() < this.access.exp - REFRESH_BUFFER_MS) return this.access.token;
+    return this.forceRefresh();
+  }
+
+  /**
+   * Refresh now, sharing any refresh already in flight (single-flight; the store lock and
+   * the auth rate limiter apply as for every refresh). Used by the export keep-fresh loop.
+   */
+  forceRefresh(): Promise<string> {
     if (!this.refreshing) {
       this.refreshing = this.refresh().finally(() => {
         this.refreshing = undefined;
       });
     }
     return this.refreshing;
+  }
+
+  /** Expiry (ms epoch) of the in-memory access token, if any. */
+  accessExpiresAt(): number | undefined {
+    return this.access?.exp;
+  }
+
+  /** True when a refresh can be attempted: a client ID, a refresh token (stored or seed) and no pending re-consent. */
+  canRefresh(): boolean {
+    if (!this.config.clientId) return false;
+    let data: StoredTokens | undefined;
+    try {
+      data = this.store.read();
+    } catch {
+      return false;
+    }
+    if (data?.needs_reauth && !(this.config.refreshTokenSeed && !(data.seen_seed_sha256 ?? []).includes(sha256(this.config.refreshTokenSeed)))) return false;
+    return Boolean(data?.refresh_token || this.config.refreshTokenSeed);
+  }
+
+  /** Whether the opt-in access-token export is configured. */
+  get exportEnabled(): boolean {
+    return this.exporter.enabled;
   }
 
   /** Drop the in-memory access token (e.g. after a 401 with no body). */

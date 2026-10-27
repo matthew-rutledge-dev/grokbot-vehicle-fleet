@@ -8,6 +8,7 @@
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import { TokenManager } from "./auth.js";
+import { KeepFresh, type Scheduler } from "./tokenexport.js";
 import { loadConfig, type Config } from "./config.js";
 import type { ToolContext } from "./context.js";
 import type { Env } from "./env.js";
@@ -42,6 +43,17 @@ export function buildContext(deps: ServerDeps = {}): ToolContext {
   const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter);
   const fleet = new FleetClient(config, http, tokens, limiter, deps.fleetOptions);
   return { config, fleet, tokens, env, usage };
+}
+
+/**
+ * Opt-in export: keep the exported access token fresh while this process runs (no-op when
+ * TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE is unset). The timer is unref'd.
+ */
+export function startTokenKeepFresh(ctx: ToolContext, deps: { now?: () => number; scheduler?: Scheduler; warn?: (m: string) => void } = {}): KeepFresh | undefined {
+  if (!ctx.tokens.exportEnabled) return undefined;
+  const k = new KeepFresh(ctx.tokens, deps.now, deps.scheduler, deps.warn);
+  void k.start();
+  return k;
 }
 
 export function createServer(ctx: ToolContext): Server {
