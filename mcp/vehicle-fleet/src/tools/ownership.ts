@@ -20,13 +20,37 @@ const list = (v: unknown, key: string): unknown[] => {
   return Array.isArray(inner) ? inner : [];
 };
 
-/** Model and model year from a Tesla VIN (position 4 = model line, position 10 = model year). Local only. */
+/** World manufacturer identifiers (VIN positions 1-3) used on Tesla vehicles. */
+export const TESLA_WMIS = ["5YJ", "7SA", "7G2", "LRW", "XP7", "SFZ"] as const;
+/** VIN position 4 (model line) -> model name. These are also the only models get_recalls accepts. */
+const VIN_MODELS: Record<string, string> = { S: "Model S", X: "Model X", "3": "Model 3", Y: "Model Y", C: "Cybertruck" };
+export const RECALL_MODELS = ["Model S", "Model 3", "Model X", "Model Y", "Cybertruck"] as const;
+
+/**
+ * Model and model year from a Tesla VIN (positions 1-3 = a Tesla WMI, 4 = model line, 10 = model
+ * year). Local only. Anything that is not a 17-character VIN with a Tesla WMI decodes to {}.
+ */
 export function decodeTeslaVin(vin: string): { model?: string; modelYear?: number } {
   if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) return {};
-  const models: Record<string, string> = { S: "Model S", X: "Model X", "3": "Model 3", Y: "Model Y", C: "Cybertruck" };
+  if (!(TESLA_WMIS as readonly string[]).includes(vin.slice(0, 3))) return {};
   const years = "ABCDEFGHJKLMNPRSTVWXY";
   const yi = years.indexOf(vin[9]);
-  return { model: models[vin[3]], modelYear: yi >= 0 ? 2010 + yi : undefined };
+  return { model: VIN_MODELS[vin[3]], modelYear: yi >= 0 ? 2010 + yi : undefined };
+}
+
+/**
+ * The model argument, matched case-insensitively against RECALL_MODELS and returned in its
+ * canonical form. Anything else (including a VIN or free text) is refused before any network call.
+ */
+export function recallModelArg(raw: unknown): string | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const v = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ").toLowerCase() : undefined;
+  const m = v ? RECALL_MODELS.find((x) => x.toLowerCase() === v) : undefined;
+  if (!m) {
+    throw new LocalRefusal("invalid_arguments", `model must be one of ${RECALL_MODELS.join(", ")}; nothing was sent.`,
+      "Leave model out to use the model decoded from the VIN.");
+  }
+  return m;
 }
 
 export const ALERT_FIELDS = ["name", "time", "audience", "user_text"] as const;
@@ -85,7 +109,7 @@ export const OWNERSHIP_TOOLS: ToolDef[] = [
   ),
   vinTool(
     "get_service_status",
-    "Service status (GET service_data: whether the car is at a service center, estimated completion, visit number). One billable data call, cached 10 min. Never wakes.",
+    "Service status (GET service_data: whether the car is at a service center, estimated completion, visit number; otherKeys lists up to 20 other field names Tesla returned, names only, no values). One billable data call, cached 10 min. Never wakes.",
     async (vin, _a, ctx) => {
       const { data, ageSec } = await ctx.fleet.serviceData(vin);
       const d = (data && typeof data === "object" ? data : {}) as Record<string, unknown>;
@@ -117,15 +141,18 @@ export const OWNERSHIP_TOOLS: ToolDef[] = [
         type: "object",
         properties: {
           ...VIN_PROP,
-          model: { type: "string", enum: ["Model S", "Model 3", "Model X", "Model Y", "Cybertruck"], description: "Override the model decoded from the VIN." },
+          model: { type: "string", enum: [...RECALL_MODELS], description: "Override the model decoded from the VIN. Only these five values are accepted." },
           model_year: { type: "integer", minimum: 2012, maximum: 2040, description: "Override the model year decoded from the VIN." },
         },
       },
     },
+    nhtsa: true,
     handler: async (args, ctx) => {
+      // Validate the override before anything else, so free text (or a VIN) can never reach NHTSA.
+      const modelArg = recallModelArg(args.model);
       const vin = await ctx.fleet.resolveVin(args.vin);
       const dec = decodeTeslaVin(vin);
-      const model = typeof args.model === "string" && args.model ? args.model : dec.model;
+      const model = modelArg ?? dec.model;
       const year = typeof args.model_year === "number" ? args.model_year : dec.modelYear;
       if (!model || !year || !Number.isInteger(year) || year < 2012 || year > 2040) {
         throw new LocalRefusal("model_year_unknown", "Could not tell the model and model year from this VIN; nothing was sent.",
@@ -135,6 +162,7 @@ export const OWNERSHIP_TOOLS: ToolDef[] = [
       try {
         res = await ctx.fleet.nhtsaRecalls(model, year);
       } catch (e) {
+        if (e instanceof LocalRefusal) throw e; // local NHTSA rate limit: nothing was sent
         const status = e instanceof FleetApiError ? e.info.status : undefined;
         throw new LocalRefusal("nhtsa_unavailable", `The NHTSA recalls service did not answer${status ? ` (HTTP ${status})` : ""}; try again later.`,
           "Tesla's own VIN recall lookup and the Tesla app show recalls for this exact car.");

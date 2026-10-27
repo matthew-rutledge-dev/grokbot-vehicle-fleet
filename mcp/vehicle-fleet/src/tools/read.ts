@@ -104,7 +104,7 @@ export const READ_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "describe_boundary",
-      description: "Shows what this server will and will not do: read-only state, location on/off (on by default) and default precision, dry-run mode, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
+      description: "Shows what this server will and will not do: read-only state, location on/off (on by default) and default precision, NHTSA recalls on/off, dry-run mode, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async (_args, ctx) => ({
@@ -112,6 +112,7 @@ export const READ_TOOLS: ToolDef[] = [
       readOnlyStatus: describeReadOnly(ctx.config.readOnly),
       locationEnabled: ctx.config.locationEnabled,
       locationDefaultPrecision: ctx.config.locationPrecision,
+      nhtsaRecallsEnabled: ctx.config.nhtsaEnabled,
       proxyConfigured: Boolean(ctx.config.proxyUrl),
       proxyCaConfigured: Boolean(ctx.config.proxyCaCertPath),
       regionConfigured: ctx.config.region ?? (ctx.config.baseUrl ? "custom base URL" : "auto-detect"),

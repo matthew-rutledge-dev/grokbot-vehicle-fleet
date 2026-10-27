@@ -64,9 +64,9 @@ export class Http {
     if (opts.form) {
       headers["Content-Type"] = "application/x-www-form-urlencoded";
       body = new URLSearchParams(opts.form).toString();
-    } else {
+    } else if (opts.json !== undefined) {
       headers["Content-Type"] = "application/json";
-      if (opts.json !== undefined) body = JSON.stringify(opts.json);
+      body = JSON.stringify(opts.json);
     }
     if (opts.token && !opts.external) headers.Authorization = `Bearer ${opts.token}`;
     let res: Awaited<ReturnType<FetchLike>>;

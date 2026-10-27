@@ -83,7 +83,10 @@ export function closureSummary(f: Record<string, unknown>): Record<string, unkno
   };
 }
 
-/** TPMS: pressures are reported in bar; add psi, and psi below the recommended cold pressure when the car reports it. */
+/**
+ * TPMS: pressures are reported in bar; add psi, and psi below the recommended cold pressure when the car
+ * reports it. psiBelowRecommended is never negative: 0 means at or above the recommended pressure.
+ */
 export function tireSummary(f: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const pos of ["fl", "fr", "rl", "rr"]) {
@@ -96,7 +99,7 @@ export function tireSummary(f: Record<string, unknown>): Record<string, unknown>
       hardWarning: f[`tpms_hard_warning_${pos}`],
       recommendedPsi: typeof rcp === "number" && rcp > 0 ? Math.round(rcp * BAR_TO_PSI * 10) / 10 : undefined,
       psiBelowRecommended: typeof rcp === "number" && rcp > 0 && typeof bar === "number"
-        ? Math.round((rcp - bar) * BAR_TO_PSI * 10) / 10 : undefined,
+        ? Math.max(0, Math.round((rcp - bar) * BAR_TO_PSI * 10) / 10) : undefined,
       lastSeen: typeof f[`tpms_last_seen_pressure_time_${pos}`] === "number"
         ? new Date((f[`tpms_last_seen_pressure_time_${pos}`] as number) * 1000).toISOString() : undefined,
     };

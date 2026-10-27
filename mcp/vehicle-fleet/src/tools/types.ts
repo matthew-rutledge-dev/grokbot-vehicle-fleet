@@ -7,5 +7,7 @@ export type ToolKind = "read" | "location" | "command";
 export type ToolDef = {
   tool: Tool;
   kind: ToolKind;
+  /** Calls the public NHTSA API: hidden and refused when TESLA_FLEET_DISABLE_NHTSA is on. */
+  nhtsa?: boolean;
   handler: (args: ToolArgs, ctx: ToolContext) => Promise<Record<string, unknown>>;
 };

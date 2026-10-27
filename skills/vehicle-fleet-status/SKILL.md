@@ -26,7 +26,7 @@ Read tools need no confirm and never wake the car.
 ## Ownership (alerts, updates, service, warranty, recalls)
 
 - "Any alerts / warnings?": `get_recent_alerts`. "What's new in the update?": `get_release_notes`. "Is it done at the service center?": `get_service_status`. "What's still under warranty?": `get_warranty` (give expiry date and mileage limit).
-- "Any recalls?": `get_recalls`. It is the public NHTSA list for the model and model year (no VIN or token leaves the machine). Say it covers the model year, not this exact car, and that the Tesla app shows whether a recall applies and is done. If the VIN cannot be decoded, ask for the model and year.
+- "Any recalls?": `get_recalls`. It is the public NHTSA list for the model and model year (no VIN or token leaves the machine). Say it covers the model year, not this exact car, and that the Tesla app shows whether a recall applies and is done. If the VIN cannot be decoded, ask for the model and year (`model` must be one of Model S, Model 3, Model X, Model Y, Cybertruck; never put a VIN or other text in it). If `get_recalls` is not listed, the operator turned NHTSA off (`TESLA_FLEET_DISABLE_NHTSA`); point to the Tesla app instead. On `rate_limited_locally`, wait; do not retry in a loop.
 - Each Fleet read here is one billable data call (cached for minutes to hours); `get_recalls` is not Fleet usage. Answer from one read; never poll these on a schedule (a separate event bridge does change detection).
 
 ## Energy site (Powerwall / solar / Wall Connector)

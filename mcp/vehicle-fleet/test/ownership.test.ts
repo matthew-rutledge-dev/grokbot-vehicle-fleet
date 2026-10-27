@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BASE, VIN, baseEnv, body, connect, fixtureData, isError, setup } from "./helpers.js";
-import { decodeTeslaVin } from "../src/tools/ownership.js";
+import { decodeTeslaVin, recallModelArg } from "../src/tools/ownership.js";
+import { NhtsaLimiter } from "../src/ratelimit.js";
 import { tireSummary } from "../src/tools/extract.js";
 
 const NHTSA = "https://api.nhtsa.gov/recalls/recallsByVehicle";
@@ -126,6 +127,102 @@ test("VIN decode", () => {
   assert.deepEqual(decodeTeslaVin(VIN17), { model: "Model 3", modelYear: 2020 });
   assert.deepEqual(decodeTeslaVin("7SAYEXAMPLE000002"), { model: "Model Y", modelYear: 2020 });
   assert.deepEqual(decodeTeslaVin("short"), {});
+});
+
+test("VIN decode: a non-Tesla manufacturer code is not decoded", () => {
+  // Obviously fake placeholders with a valid 17-character shape but no Tesla WMI.
+  assert.deepEqual(decodeTeslaVin("1ABCEXAMPLE000003"), {});
+  assert.deepEqual(decodeTeslaVin("ZZZ3EXAMPLE000004"), {});
+  for (const wmi of ["5YJ", "7SA", "7G2", "LRW", "XP7", "SFZ"]) {
+    assert.equal(decodeTeslaVin(`${wmi}3EXAMPLE000005`).model, "Model 3", wmi);
+  }
+});
+
+test("tires: psiBelowRecommended is clamped at 0 when a tire is above the recommended pressure", () => {
+  const t = tireSummary({ tpms_pressure_fl: 3.0, tpms_pressure_fr: 2.89, tpms_rcp_front_value: 2.9 });
+  assert.equal((t.fl as Record<string, unknown>).psiBelowRecommended, 0);
+  assert.equal(Object.is((t.fr as Record<string, unknown>).psiBelowRecommended, -0), false);
+  assert.equal((t.fr as Record<string, unknown>).psiBelowRecommended, 0.1);
+});
+
+test("recalls: model is validated before any call; free text and VIN-like strings never reach NHTSA", async () => {
+  const { ctx, calls } = setup(baseEnv(), { [`GET ${NHTSA}`]: () => ({ status: 200, body: { Count: 0, results: [] } }) });
+  const c = await connect(ctx);
+  for (const model of ["Roadster", VIN17, "5YJ3EXAMPLE000009", "Model 3; DROP", "", " ", 3, ["Model 3"]]) {
+    const r = await c.callTool({ name: "get_recalls", arguments: { vin: VIN17, model, model_year: 2024 } });
+    assert.equal(isError(r), true, String(model));
+    assert.equal(body(r).code, "invalid_arguments", String(model));
+    assert.equal(body(r).sent, false);
+  }
+  assert.equal(calls.length, 0, "nothing sent for a bad model (no NHTSA, no token refresh, no vehicle lookup)");
+  // Case-insensitive match is canonicalised.
+  const ok = body(await c.callTool({ name: "get_recalls", arguments: { vin: VIN17, model: "  model   y ", model_year: 2024 } }));
+  assert.equal(ok.model, "Model Y");
+  assert.equal(new URL(calls[0].url).searchParams.get("model"), "MODEL Y");
+  assert.equal(recallModelArg(undefined), undefined);
+  assert.equal(recallModelArg("CYBERTRUCK"), "Cybertruck");
+});
+
+test("recalls: local NHTSA limiter refuses before sending (min interval and hourly cap)", async () => {
+  let t = 1_000_000;
+  const lim = new NhtsaLimiter(() => t, 5_000, 3);
+  lim.take();
+  assert.throws(() => lim.take(), (e: Error & { code?: string; extra?: { retryAfterSec?: number } }) => e.code === "rate_limited_locally" && e.extra?.retryAfterSec === 5);
+  t += 5_000; lim.take();
+  t += 5_000; lim.take();
+  t += 5_000;
+  assert.throws(() => lim.take(), (e: Error & { code?: string; extra?: { retryAfterSec?: number } }) => e.code === "rate_limited_locally" && e.extra?.retryAfterSec === 3600 - 15);
+  t = 1_000_000 + 3_600_000; lim.take(); // the first request has left the window
+
+  // Through the tool: a second uncached query right away is refused locally, nothing sent; cache hits are not limited.
+  const { ctx, calls } = setup(baseEnv(), { [`GET ${NHTSA}`]: () => ({ status: 200, body: { Count: 0, results: [] } }) });
+  const c = await connect(ctx);
+  assert.equal(body(await c.callTool({ name: "get_recalls", arguments: { vin: VIN17 } })).ok, true);
+  assert.equal(body(await c.callTool({ name: "get_recalls", arguments: { vin: VIN17 } })).ok, true, "cache hit");
+  const r = await c.callTool({ name: "get_recalls", arguments: { vin: VIN17, model: "Model Y", model_year: 2024 } });
+  assert.equal(isError(r), true);
+  assert.equal(body(r).code, "rate_limited_locally");
+  assert.equal(calls.length, 1);
+});
+
+test("TESLA_FLEET_DISABLE_NHTSA hides and refuses get_recalls; nothing is sent", async () => {
+  for (const v of ["1", "true", "ON", "garbage"]) {
+    const { ctx, calls } = setup(baseEnv({ TESLA_FLEET_DISABLE_NHTSA: v }));
+    assert.equal(ctx.config.nhtsaEnabled, false, v);
+    const c = await connect(ctx);
+    const names = (await c.listTools()).tools.map((t) => t.name);
+    assert.ok(!names.includes("get_recalls"), v);
+    assert.ok(names.includes("get_warranty"), v);
+    assert.equal(names.length, 21, v);
+    const r = await c.callTool({ name: "get_recalls", arguments: { vin: VIN17 } });
+    assert.equal(isError(r), true);
+    assert.equal(body(r).nhtsaEnabled, false);
+    assert.equal(calls.length, 0);
+    assert.equal(body(await c.callTool({ name: "describe_boundary", arguments: {} })).nhtsaRecallsEnabled, false);
+  }
+  assert.ok(setup(baseEnv({ TESLA_FLEET_DISABLE_NHTSA: "garbage" })).ctx.config.warnings.some((w) => w.includes("TESLA_FLEET_DISABLE_NHTSA")));
+  for (const v of ["0", "false", "off", "${TESLA_FLEET_DISABLE_NHTSA}"]) {
+    const { ctx } = setup(baseEnv({ TESLA_FLEET_DISABLE_NHTSA: v }));
+    assert.equal(ctx.config.nhtsaEnabled, true, v);
+    const names = (await (await connect(ctx)).listTools()).tools.map((t) => t.name);
+    assert.ok(names.includes("get_recalls"), v);
+    assert.equal(names.length, 22, v);
+  }
+});
+
+test("HTTP: Content-Type only with a body", async () => {
+  const { ctx, calls } = setup(baseEnv(), { [`GET ${NHTSA}`]: () => ({ status: 200, body: { Count: 0, results: [] } }) });
+  const c = await connect(ctx);
+  await c.callTool({ name: "get_recalls", arguments: { vin: VIN17 } });
+  const h = (i: number) => Object.keys(calls[i].headers).some((k) => k.toLowerCase() === "content-type");
+  assert.equal(calls[0].body, undefined);
+  assert.equal(h(0), false);
+  // A request with a body (the form-encoded token refresh) still sends Content-Type; bodiless Fleet GETs do not.
+  await c.callTool({ name: "get_warranty", arguments: { vin: VIN } });
+  const post = calls.findIndex((x) => x.method === "POST");
+  const get = calls.findIndex((x) => x.method === "GET" && x.url.includes("/warranty/"));
+  assert.ok(post > 0 && h(post));
+  assert.ok(get > 0 && !h(get));
 });
 
 test("ownership reads stay listed in read-only mode and no command is reachable", async () => {

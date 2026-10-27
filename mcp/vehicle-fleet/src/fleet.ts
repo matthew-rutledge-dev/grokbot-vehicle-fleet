@@ -10,7 +10,7 @@ import { TtlCache } from "./cache.js";
 import { REGION_BASE_URLS, type Config } from "./config.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
 import { unwrap, type Http } from "./http.js";
-import type { RateLimiter } from "./ratelimit.js";
+import { NhtsaLimiter, type RateLimiter } from "./ratelimit.js";
 import type { UsageCategory } from "./usage.js";
 
 export type VehicleSummary = {
@@ -59,6 +59,8 @@ export type FleetClientOptions = {
   sleep?: (ms: number) => Promise<void>;
   wakePollMs?: number;
   wakeTimeoutMs?: number;
+  /** Local NHTSA limiter (injectable for tests). */
+  nhtsaLimiter?: NhtsaLimiter;
 };
 
 export class FleetClient {
@@ -69,6 +71,7 @@ export class FleetClient {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly wakePollMs: number;
   private readonly wakeTimeoutMs: number;
+  private readonly nhtsaLimiter: NhtsaLimiter;
 
   constructor(
     private readonly config: Config,
@@ -81,6 +84,7 @@ export class FleetClient {
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.wakePollMs = opts.wakePollMs ?? 5_000;
     this.wakeTimeoutMs = opts.wakeTimeoutMs ?? 60_000;
+    this.nhtsaLimiter = opts.nhtsaLimiter ?? new NhtsaLimiter();
   }
 
   get billableCalls(): number {
@@ -279,6 +283,7 @@ export class FleetClient {
     const key = `recalls:${q}`;
     const hit = this.cache.get<unknown>(key, RECALLS_TTL_MS);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
+    this.nhtsaLimiter.take(); // throws LocalRefusal before any request
     const res = await this.http.request({ method: "GET", url: `${NHTSA_BASE_URL}/recalls/recallsByVehicle?${q}`, external: true, timeoutMs: 15_000 }, "other");
     this.cache.set(key, res.body);
     return { data: res.body, ageSec: 0 };
