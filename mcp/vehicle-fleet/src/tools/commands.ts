@@ -265,7 +265,7 @@ export function connectFailure(e: unknown): { code: string; message: string } | 
   const code = cause?.code ?? (e as { code?: string })?.code;
   if (!code) return undefined;
   if (NOT_SENT_NET.has(code)) return { code: "proxy_unreachable", message: `Could not connect to the command proxy (${code}); nothing was sent.` };
-  if (TLS_CODES.test(code)) return { code: "proxy_tls_error", message: `TLS check failed for the command proxy (${code}); nothing was sent. Check TESLA_COMMAND_PROXY_CA_CERT and the certificate's host name.` };
+  if (TLS_CODES.test(code)) return { code: "proxy_tls_error", message: `TLS check failed for the command proxy (${code}); nothing was sent. Check TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) and the certificate's host name.` };
   return undefined;
 }
 
@@ -399,7 +399,7 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
   const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: o.requireExplicitVin });
   if (!ctx.config.proxyUrl) {
     throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
-      "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT for a private CA (skill vehicle-fleet-setup).");
+      "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) for a private CA (skill vehicle-fleet-setup).");
   }
   await ctx.fleet.requireOnline(vin);
   const fs = await ctx.fleet.fleetStatus(vin);

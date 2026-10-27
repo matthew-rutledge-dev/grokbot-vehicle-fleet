@@ -35,7 +35,7 @@ The helper writes the token store (0600) and prints no secrets. Alternatively se
 Run Tesla's `tesla-http-proxy` (from `teslamotors/vehicle-command`) yourself, bound to loopback or a private host, with your private key and a TLS cert whose SAN matches the host. Then set:
 
 - `TESLA_COMMAND_PROXY_URL=https://proxy.example.com:4443`
-- `TESLA_COMMAND_PROXY_CA_CERT=/path/to/proxy-ca-or-cert.pem`
+- `TESLA_COMMAND_PROXY_CA_CERT=/path/to/proxy-ca-or-cert.pem` (alias `TESLA_FLEET_PROXY_CA_FILE`)
 
 The plugin never downloads, builds, or starts the proxy.
 

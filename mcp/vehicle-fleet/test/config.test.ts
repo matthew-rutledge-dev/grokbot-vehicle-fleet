@@ -119,3 +119,11 @@ test("TESLA_FLEET_ENABLE_LOCATION: default on; off values off; unrecognised = of
   assert.equal(p.locationPrecision, "coarse");
   assert.equal(p.warnings.length, 1);
 });
+
+test("TESLA_FLEET_PROXY_CA_FILE is an alias for TESLA_COMMAND_PROXY_CA_CERT; the primary name wins", () => {
+  assert.equal(loadConfig({ TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/alias-ca.pem");
+  assert.equal(loadConfig({ TESLA_COMMAND_PROXY_CA_CERT: "/path/to/primary-ca.pem", TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/primary-ca.pem");
+  assert.equal(loadConfig({ TESLA_COMMAND_PROXY_CA_CERT: "${TESLA_COMMAND_PROXY_CA_CERT}", TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/alias-ca.pem", "unexpanded primary placeholder falls back to the alias");
+  assert.equal(loadConfig({}).proxyCaCertPath, undefined);
+  assert.equal(configPresence({ TESLA_FLEET_PROXY_CA_FILE: "/x.pem" }).TESLA_FLEET_PROXY_CA_FILE, "set");
+});

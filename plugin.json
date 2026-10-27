@@ -78,6 +78,11 @@
         "title": "Command proxy CA cert path",
         "description": "Optional. Path to the PEM your proxy's TLS certificate chains to (or the self-signed cert). TLS verification is never disabled."
       },
+      "TESLA_FLEET_PROXY_CA_FILE": {
+        "type": "string",
+        "title": "Command proxy CA file (alias)",
+        "description": "Optional alias for TESLA_COMMAND_PROXY_CA_CERT, for env loaders that already export this name. Used only when TESLA_COMMAND_PROXY_CA_CERT is unset."
+      },
       "TESLA_TOKEN_STORE": {
         "type": "string",
         "title": "Token store path",

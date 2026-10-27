@@ -337,7 +337,7 @@ export class FleetClient {
   async command(vin: string, name: string, body: Record<string, unknown>): Promise<{ result?: boolean; reason?: string }> {
     if (!this.config.proxyUrl) {
       throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
-        "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT for a private CA (skill vehicle-fleet-setup).");
+        "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) for a private CA (skill vehicle-fleet-setup).");
     }
     this.limiter.take("command", vin);
     const url = `${this.config.proxyUrl}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`;

@@ -66,7 +66,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_REGION` | no | `na` / `eu` / `cn`; default auto-detect via `/api/1/users/region` |
 | `TESLA_FLEET_BASE_URL` | no | https override for the Fleet API base URL |
 | `TESLA_COMMAND_PROXY_URL` | for commands | Your proxy, e.g. `https://proxy.example.com:4443`. Alias: `TESLA_FLEET_PROXY_URL` |
-| `TESLA_COMMAND_PROXY_CA_CERT` | for a private CA / self-signed proxy cert | Path to the PEM to trust for the proxy only. TLS verification is never disabled. |
+| `TESLA_COMMAND_PROXY_CA_CERT` | for a private CA / self-signed proxy cert | Path to the PEM to trust for the proxy only. TLS verification is never disabled. Alias: `TESLA_FLEET_PROXY_CA_FILE` |
 | `TESLA_TOKEN_STORE` | no | Token store path (default below) |
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
 | `TESLA_FLEET_ENABLE_LOCATION` | no | Location is **on by default**. `0`/`false`/`no`/`off` hides and refuses `get_location`. Any other value = **off**, one warning on stderr (see below) |
@@ -86,7 +86,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_RATE_WAKES_PER_USD` | no | Usage estimate only: wakes per USD (default `50`) |
 | `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
 
-**Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET` or `TESLA_FLEET_PROXY_URL`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
+**Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
 **PowerShell env loaders.** If you load these variables with a PowerShell script (dot-sourced in the shell that launches the MCP server or the auth helper), run it under PowerShell 7 (`pwsh`). Some loaders hang or fail under Windows PowerShell 5.1.
 

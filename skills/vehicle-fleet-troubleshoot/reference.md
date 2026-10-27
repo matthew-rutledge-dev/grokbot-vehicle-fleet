@@ -14,7 +14,7 @@
 | local | `proxy_not_configured` | no | no `TESLA_COMMAND_PROXY_URL` (alias `TESLA_FLEET_PROXY_URL`) | configure proxy |
 | 403 | `missing_location_scope` | yes | token lacks `vehicle_location` (get_location) | re-run `auth-helper.mjs url` (default scopes include it); or opt out with `TESLA_FLEET_ENABLE_LOCATION=0` |
 | local | `proxy_unreachable` | no | proxy refused the connection or the host did not resolve; not sent | start or fix the proxy |
-| local | `proxy_tls_error` | no | proxy certificate not trusted / hostname mismatch; not sent | check `TESLA_COMMAND_PROXY_CA_CERT` and the cert SAN |
+| local | `proxy_tls_error` | no | proxy certificate not trusted / hostname mismatch; not sent | check `TESLA_COMMAND_PROXY_CA_CERT` (alias `TESLA_FLEET_PROXY_CA_FILE`) and the cert SAN |
 | local | `invalid_arguments` | no | parameter out of range; checked before any network call | fix the value |
 | 401 | `unauthorized` | yes | access token expired | refreshed once automatically |
 | 401 | `login_required` | yes | refresh token expired/used/revoked/password reset | re-consent |

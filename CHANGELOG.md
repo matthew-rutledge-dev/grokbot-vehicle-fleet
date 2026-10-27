@@ -7,6 +7,7 @@
 - Auth helper: `vehicle_location` is now in the default scopes; `url --no-location` / `TESLA_AUTH_LOCATION=0` drops it. Turning location off on the server does not remove the scope from an existing token.
 - Energy commands: success is `{}` (seen live), `{response: {}}`, an empty (0-byte or whitespace-only) body, `{code: 201}` or another plain result object. Results include a debug-safe `rawShape` (shape only, no values). An `error` key, `result: false` (reason surfaced) or code 400+ is `rejected` (`sent: true`); a null, string or other non-object body is `state_unknown`. No retries.
 - `wake_vehicle` dry-run masks the VIN; `describe_boundary` text updated for location on by default. Docs: energy commands are unsigned and need no command proxy (verified live).
+- `TESLA_FLEET_PROXY_CA_FILE` is accepted as an alias for `TESLA_COMMAND_PROXY_CA_CERT` (used only when the primary name is unset).
 - Tool counts: 16 read-only, 42 with commands on (one fewer each with location off).
 
 ## 0.3.0 (unreleased)
