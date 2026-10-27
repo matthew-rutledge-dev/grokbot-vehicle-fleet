@@ -202,7 +202,7 @@ No other endpoints, no telemetry, no analytics.
 
 This plugin is the **request and command path**: an agent asks, the plugin reads (cached first) or, when commands are on, sends one confirm-gated command. It does not watch the car, receive telemetry or push alerts.
 
-Event triggers (charge complete, plugged in or unplugged, door or trunk open while parked, Sentry alerts, low battery, software update available) and energy-site alerts (grid outage, battery near the backup reserve, storm watch) live in a separate, self-hosted event bridge with a Tesla source adapter. That bridge:
+Event triggers (charge complete, plugged in or unplugged, door or trunk open while parked, Sentry alerts, low battery, software update available) and energy-site alerts (grid outage, battery near the backup reserve, storm watch) live in an event bridge with a Tesla source adapter. The bridge is a **separate, self-hosted project, not part of this repository**; you install and run it yourself, and this plugin neither ships nor starts it. That bridge:
 
 - receives Fleet Telemetry records from Tesla's own `fleet-telemetry` server (which you host behind a public mTLS endpoint) and polls energy-site `live_status` read-only;
 - wakes an agent with a short prompt carrying a masked VIN or site id;
