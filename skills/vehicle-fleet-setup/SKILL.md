@@ -7,6 +7,8 @@ description: use this only when the operator explicitly asks to set up or reconf
 
 Never run silently. Never ask for secrets in chat; the operator sets plugin variables (or host secrets) and runs commands in their own terminal. Placeholders below: `example-user`, `keys.example.com`, `https://proxy.example.com`, `5YJ000000EXAMPLE`.
 
+Scope: this plugin is the request and command path only. Event triggers and telemetry alerts (charge, plug, doors, Sentry, battery, updates, grid outage) are set up in the event bridge's Tesla adapter (a separate, self-hosted project, not part of this repository), not here; see the README section "Event triggers and telemetry alerts".
+
 ## 1. Developer app (operator, on developer.tesla.com)
 
 - Create an application; note the client ID (and secret).
