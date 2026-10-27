@@ -4,7 +4,9 @@ No secrets in this file.
 
 ## TODO
 
-- **Energy settings commands:** confirm-gated, hidden under read-only: backup reserve, operation mode, storm mode, grid import/export and grid charging, off-grid vehicle charging reserve. Needs `energy_cmds`. (Energy reads shipped in 0.2.0.)
+- Off-grid vehicle charging reserve (energy command; other energy settings commands shipped in 0.3.0).
+- Pin the seat heater body field names and seat numbering against the current proxy (0.3.0 sends both documented key sets).
+- Steering wheel heat level (`set_steering_wheel_heat_level`) next to on/off.
 - Pin energy `live_status` / `site_info` / `calendar_history` field names against a redacted real response; add fixtures.
 - Pin `vehicle_data_cached` and TPMS field names/units against a redacted real response; add it as a fixture.
 - Confirm the pricing category of `GET /api/1/vehicles/{vin}` and `fleet_status` and adjust the dry-run cost estimate and the `other` bucket of `get_api_usage`.

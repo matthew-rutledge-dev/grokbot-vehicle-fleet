@@ -4,7 +4,7 @@
  */
 import os from "node:os";
 import path from "node:path";
-import { readEnv, readOptInFlag, type Env } from "./env.js";
+import { OFF_VALUES, ON_VALUES, readEnv, readOptInFlag, type Env } from "./env.js";
 import { resolveReadOnly, READ_ONLY_ENV, type ReadOnlyResolution } from "./readonly.js";
 import { DEFAULT_RATES, type Rates } from "./usage.js";
 
@@ -33,12 +33,76 @@ export const ENV = {
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
   DEFAULT_VIN: "TESLA_DEFAULT_VIN",
   DEFAULT_ENERGY_SITE: "TESLA_DEFAULT_ENERGY_SITE_ID",
+  DRY_RUN: "TESLA_FLEET_DRY_RUN",
+  CLIMATE_TEMP_C: "TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C",
+  CLIMATE_SEAT_LEVEL: "TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL",
+  CLIMATE_SEATS: "TESLA_FLEET_DEFAULT_HEATED_SEATS",
+  CLIMATE_COLD_BELOW_C: "TESLA_FLEET_COLD_OUTSIDE_BELOW_C",
+  CLIMATE_DEFROST_BELOW_C: "TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C",
+  CLIMATE_WHEEL_WHEN_COLD: "TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD",
   KEY_DOMAIN: "TESLA_FLEET_KEY_DOMAIN",
   RATE_DATA: "TESLA_FLEET_RATE_DATA_PER_USD",
   RATE_COMMANDS: "TESLA_FLEET_RATE_COMMANDS_PER_USD",
   RATE_WAKES: "TESLA_FLEET_RATE_WAKES_PER_USD",
   MONTHLY_DISCOUNT: "TESLA_FLEET_MONTHLY_DISCOUNT_USD",
 } as const;
+
+/** Defaults for the climate_warm_up preset (all overridable per call). */
+export type ClimateDefaults = {
+  tempC: number;
+  /** Seat heater level 0-3 used when it is cold outside. */
+  seatLevel: number;
+  /** Which seats get heat when cold. */
+  seats: "driver" | "front" | "none";
+  /** Outside temperature (C) below which seats / wheel heat are added. */
+  coldBelowC: number;
+  /** Outside temperature (C) below which max defrost is turned on. */
+  defrostBelowC: number;
+  wheelWhenCold: boolean;
+};
+
+export const DEFAULT_CLIMATE: ClimateDefaults = Object.freeze({
+  tempC: 21, seatLevel: 2, seats: "driver", coldBelowC: 5, defrostBelowC: -2, wheelWhenCold: true,
+});
+
+/** TESLA_FLEET_DRY_RUN fails closed: unset/off values = off, on values = on, anything else = on + warning. */
+function resolveDryRun(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.DRY_RUN, env);
+  if (v === undefined) return false;
+  const l = v.toLowerCase();
+  if (OFF_VALUES.includes(l)) return false;
+  if (ON_VALUES.includes(l)) return true;
+  warnings.push(`${ENV.DRY_RUN} has an unrecognised value; dry-run mode is ON (nothing will be sent). Use 1/true/on or 0/false/off.`);
+  return true;
+}
+
+function loadClimate(env: Env, warnings: string[]): ClimateDefaults {
+  const n = (name: string, fallback: number, min: number, max: number, int = false): number => {
+    const raw = readEnv(name, env);
+    if (raw === undefined) return fallback;
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v < min || v > max || (int && !Number.isInteger(v))) {
+      warnings.push(`${name} must be ${int ? "an integer" : "a number"} from ${min} to ${max}; using the default ${fallback}.`);
+      return fallback;
+    }
+    return v;
+  };
+  const seatsRaw = readEnv(ENV.CLIMATE_SEATS, env)?.toLowerCase();
+  let seats = DEFAULT_CLIMATE.seats;
+  if (seatsRaw !== undefined) {
+    if (seatsRaw === "driver" || seatsRaw === "front" || seatsRaw === "none") seats = seatsRaw;
+    else warnings.push(`${ENV.CLIMATE_SEATS} must be driver, front or none; using the default ${seats}.`);
+  }
+  const wheelRaw = readEnv(ENV.CLIMATE_WHEEL_WHEN_COLD, env);
+  return Object.freeze({
+    tempC: n(ENV.CLIMATE_TEMP_C, DEFAULT_CLIMATE.tempC, 15, 28),
+    seatLevel: n(ENV.CLIMATE_SEAT_LEVEL, DEFAULT_CLIMATE.seatLevel, 0, 3, true),
+    seats,
+    coldBelowC: n(ENV.CLIMATE_COLD_BELOW_C, DEFAULT_CLIMATE.coldBelowC, -40, 30),
+    defrostBelowC: n(ENV.CLIMATE_DEFROST_BELOW_C, DEFAULT_CLIMATE.defrostBelowC, -40, 30),
+    wheelWhenCold: wheelRaw === undefined ? DEFAULT_CLIMATE.wheelWhenCold : readOptInFlag(ENV.CLIMATE_WHEEL_WHEN_COLD, env),
+  });
+}
 
 export type Config = {
   clientId?: string;
@@ -54,6 +118,9 @@ export type Config = {
   defaultVin?: string;
   /** Optional default energy_site_id for energy reads. */
   defaultEnergySiteId?: string;
+  /** TESLA_FLEET_DRY_RUN on: confirmed commands are validated and returned, never sent. */
+  dryRun: boolean;
+  climate: ClimateDefaults;
   keyDomain?: string;
   /** Rates for the local usage estimate (get_api_usage). */
   rates: Rates;
@@ -183,6 +250,8 @@ export function loadConfig(env: Env = process.env): Config {
     locationEnabled: readOptInFlag(ENV.ENABLE_LOCATION, env),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
     defaultEnergySiteId: readEnv(ENV.DEFAULT_ENERGY_SITE, env),
+    dryRun: resolveDryRun(env, warnings),
+    climate: loadClimate(env, warnings),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
     rates,
     problems,

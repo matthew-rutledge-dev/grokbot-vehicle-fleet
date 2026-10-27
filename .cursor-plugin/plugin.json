@@ -1,8 +1,8 @@
 {
   "name": "grokbot-vehicle-fleet",
   "displayName": "Grok Bot Vehicle Fleet",
-  "version": "0.2.2",
-  "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
+  "version": "0.3.0",
+  "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge"
   },
@@ -101,7 +101,42 @@
       "TESLA_DEFAULT_ENERGY_SITE_ID": {
         "type": "string",
         "title": "Default energy site id",
-        "description": "Optional default energy_site_id for energy reads (placeholder 1234567890). Without it, the only energy site on the account is used."
+        "description": "Optional default energy_site_id for energy reads and commands (placeholder 1234567890). Without it, the only energy site on the account is used."
+      },
+      "TESLA_FLEET_DRY_RUN": {
+        "type": "string",
+        "title": "Command dry-run mode",
+        "description": "Optional. 1/true/yes/on: confirmed commands are validated and return the exact request without sending anything. Default off."
+      },
+      "TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C": {
+        "type": "string",
+        "title": "Warm-up cabin temperature (C)",
+        "description": "Optional climate_warm_up setpoint for driver and passenger, 15-28 (e.g. 21). Default 21."
+      },
+      "TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL": {
+        "type": "string",
+        "title": "Warm-up seat heat level",
+        "description": "Optional seat heater level 0-3 used by climate_warm_up when it is cold outside (e.g. 2). Default 2."
+      },
+      "TESLA_FLEET_DEFAULT_HEATED_SEATS": {
+        "type": "string",
+        "title": "Warm-up heated seats",
+        "description": "Optional: driver, front or none (e.g. driver). Default driver."
+      },
+      "TESLA_FLEET_COLD_OUTSIDE_BELOW_C": {
+        "type": "string",
+        "title": "Cold threshold (C)",
+        "description": "Optional: climate_warm_up adds seat (and steering wheel) heat when the cached outside temperature is below this (e.g. 5). Default 5."
+      },
+      "TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C": {
+        "type": "string",
+        "title": "Defrost threshold (C)",
+        "description": "Optional: climate_warm_up adds max defrost when the cached outside temperature is below this (e.g. -2). Default -2."
+      },
+      "TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD": {
+        "type": "string",
+        "title": "Steering wheel heat when cold",
+        "description": "Optional on/off: climate_warm_up also heats the steering wheel when cold and the driver seat is included. Default on."
       },
       "TESLA_FLEET_KEY_DOMAIN": {
         "type": "string",

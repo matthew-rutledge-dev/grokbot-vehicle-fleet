@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.0 (unreleased)
+
+Command tools. Still read-only by default; every command stays hidden and refused unless `TESLA_FLEET_READ_ONLY` is explicitly off.
+
+- New vehicle commands: `set_seat_heater`, `set_steering_wheel_heater`, `set_cabin_overheat_protection`, `set_defrost_max`, `set_sentry_mode`, `flash_lights`, `honk_horn`, `set_charging_amps`, `charge_port_door_open`, `charge_port_door_close`.
+- `climate_warm_up` preset: climate on plus setpoints, and seat / steering wheel heat and max defrost when the cached outside temperature is cold. Defaults are configurable with `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`, `TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL`, `TESLA_FLEET_DEFAULT_HEATED_SEATS`, `TESLA_FLEET_COLD_OUTSIDE_BELOW_C`, `TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C` and `TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD`.
+- Energy-site commands: `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export` (scope `energy_cmds`; sent directly to the Fleet API).
+- `TESLA_FLEET_DRY_RUN=1`: confirmed commands are validated and return the exact request without sending it (VIN masked, navigation destination not echoed). Fails closed: unrecognised values turn dry-run on with a warning.
+- Command outcome is `state_unknown` (`sent: "unknown"`, no retry) for timeouts, 408, 5xx and connection errors after the request started; pre-connect failures stay `sent: false`. Multi-step presets report `sent: "partial"` when some steps ran.
+- Clearer command errors: `proxy_unreachable` and `proxy_tls_error` (not sent), and `missing_scope` names the scope and the auth-helper flag to add.
+- Auth helper: opt-in `--commands` / `TESLA_AUTH_COMMANDS` (vehicle_cmds, vehicle_charging_cmds) and `--energy-commands` / `TESLA_AUTH_ENERGY_COMMANDS` (energy_cmds); unknown flags are rejected. Default scopes unchanged.
+- `describe_boundary` shows the dry-run mode and climate defaults.
+- Tests for every command's request shape, confirm/read-only/dry-run gates, parameter validation before any network call, proxy failures, scope hints and redaction.
+
 ## 0.2.2 (unreleased)
 
 - CI also runs on Node 22.19.0 (the exact `engines` minimum) next to latest 22 and 24, on ubuntu and windows.

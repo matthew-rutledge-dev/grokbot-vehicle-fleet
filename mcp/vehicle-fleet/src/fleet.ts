@@ -279,6 +279,19 @@ export class FleetClient {
     return { data, ageSec: 0 };
   }
 
+  /**
+   * Energy-site setting change: POST /api/1/energy_sites/{id}/{path} directly to the Fleet API
+   * (energy commands are not signed by the vehicle proxy). Billed; never retried.
+   */
+  async energyCommand(siteId: string, path: string, body: Record<string, unknown>): Promise<Record<string, unknown>> {
+    this.limiter.take("command", `site:${siteId}`);
+    const base = await this.resolveBaseUrl();
+    const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
+    this.cache.deletePrefix(`energy_info:${siteId}`);
+    this.cache.deletePrefix(`energy_live:${siteId}`);
+    return unwrap<Record<string, unknown>>(res.body) ?? {};
+  }
+
   /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */
   energyLiveStatus(siteId: string) {
     return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");
@@ -323,7 +336,7 @@ export class FleetClient {
   async command(vin: string, name: string, body: Record<string, unknown>): Promise<{ result?: boolean; reason?: string }> {
     if (!this.config.proxyUrl) {
       throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
-        "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (skill vehicle-fleet-setup).");
+        "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT for a private CA (skill vehicle-fleet-setup).");
     }
     this.limiter.take("command", vin);
     const url = `${this.config.proxyUrl}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`;

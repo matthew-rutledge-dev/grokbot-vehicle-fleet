@@ -17,7 +17,7 @@ Never run silently. Never ask for secrets in chat; the operator sets plugin vari
 
 ## 2. First refresh token
 
-Pick the smallest scopes: read-only = `openid offline_access vehicle_device_data`; add `energy_device_data` only for Powerwall/solar reads (`url --energy` or `TESLA_AUTH_ENERGY=1`); add `vehicle_location` only for location; `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
+Pick the smallest scopes: read-only = `openid offline_access vehicle_device_data`; add `energy_device_data` only for Powerwall/solar reads (`url --energy` or `TESLA_AUTH_ENERGY=1`); add `vehicle_location` only for location. Command scopes are opt-in: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` for Powerwall settings.
 
 ```bash
 export TESLA_CLIENT_ID=...        # in your terminal, not in chat
@@ -45,4 +45,4 @@ Open `https://www.tesla.com/_ak/keys.example.com` on the phone with the Tesla ap
 
 ## 5. Plugin variables
 
-`TESLA_CLIENT_ID` (required); optionally `TESLA_FLEET_REGION`, `TESLA_DEFAULT_VIN`, `TESLA_FLEET_ENABLE_LOCATION=1`, and `TESLA_FLEET_READ_ONLY=false` **only** if the operator wants commands. Run `scripts/bootstrap-mcp.sh` (or `.ps1`), reload MCP servers, then `describe_boundary` to verify (shows set/missing only).
+`TESLA_CLIENT_ID` (required); optionally `TESLA_FLEET_REGION`, `TESLA_DEFAULT_VIN`, `TESLA_FLEET_ENABLE_LOCATION=1`, and `TESLA_FLEET_READ_ONLY=false` **only** if the operator wants commands. For a first run with commands on, set `TESLA_FLEET_DRY_RUN=1`: confirmed commands are validated and return the exact request, nothing is sent. Optional warm-up defaults: `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C` (e.g. `21`), `TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL` (`0`-`3`), `TESLA_FLEET_DEFAULT_HEATED_SEATS` (`driver`/`front`/`none`), `TESLA_FLEET_COLD_OUTSIDE_BELOW_C`, `TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C`, `TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD`. Run `scripts/bootstrap-mcp.sh` (or `.ps1`), reload MCP servers, then `describe_boundary` to verify (shows set/missing only).

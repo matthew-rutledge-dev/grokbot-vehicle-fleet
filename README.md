@@ -71,7 +71,14 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
 | `TESLA_FLEET_ENABLE_LOCATION` | no | `1`/`true`/`yes`/`on` lists `get_location` |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
-| `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads (e.g. `1234567890`); otherwise the only site on the account |
+| `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads and commands (e.g. `1234567890`); otherwise the only site on the account |
+| `TESLA_FLEET_DRY_RUN` | no | `1`/`true`/`yes`/`on`: confirmed commands are validated and return the exact request; **nothing is sent**. Unset or `0`/`false`/`no`/`off` = off; **any other value = on** (fails closed, one warning on stderr) |
+| `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C` | no | `climate_warm_up` setpoint, 15-28 °C (default `21`, which the car shows as 70 °F) |
+| `TESLA_FLEET_DEFAULT_SEAT_HEAT_LEVEL` | no | Seat heat level 0-3 when cold (default `2`) |
+| `TESLA_FLEET_DEFAULT_HEATED_SEATS` | no | `driver` / `front` / `none` (default `driver`) |
+| `TESLA_FLEET_COLD_OUTSIDE_BELOW_C` | no | "Cold" threshold for seat and steering wheel heat, °C (default `5`) |
+| `TESLA_FLEET_DEFROST_OUTSIDE_BELOW_C` | no | Max defrost below this outside temperature, °C (default `-2`) |
+| `TESLA_FLEET_STEERING_WHEEL_HEAT_WHEN_COLD` | no | `on`/`off`: also heat the wheel when cold (default `on`) |
 | `TESLA_FLEET_KEY_DOMAIN` | no | Your key domain, used only to show the pairing link |
 | `TESLA_FLEET_RATE_DATA_PER_USD` | no | Usage estimate only: data calls per USD (default `500`) |
 | `TESLA_FLEET_RATE_COMMANDS_PER_USD` | no | Usage estimate only: commands per USD (default `1000`) |
@@ -99,25 +106,50 @@ In read-only mode command tools are absent from `tools/list` and refused if call
 
 Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (only with `TESLA_FLEET_ENABLE_LOCATION`; coarse ~1 km unless `precision=precise`).
 
-Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). Energy settings changes (backup reserve, operation mode, storm mode, grid import/export) are **not** supported yet. If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
+Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
 
-Tool counts: **15** in the default read-only mode (11 vehicle + 4 energy reads), **26** with `TESLA_FLEET_READ_ONLY` off (+ 11 vehicle commands), plus `get_location` when location is enabled.
+Tool counts: **15** in the default read-only mode (11 vehicle + 4 energy reads), **41** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands), plus `get_location` when location is enabled.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
-Commands (hidden unless read-only is explicitly off): `wake_vehicle`, `door_lock`, `door_unlock`, `actuate_trunk`, `climate_start`, `climate_stop`, `set_temps`, `charge_start`, `charge_stop`, `set_charge_limit`, `share_navigation`.
+### Commands
 
-Every command:
-- returns a **dry-run** unless called with `confirm=true` **and** `user_request` (a short quote of the human's request in the current conversation);
-- is refused if the vehicle is not already online (no auto-wake), if the virtual key is not paired (checked first via `fleet_status`, so you are not billed for a rejected command), or if no proxy is configured;
-- is sent through your proxy (`/api/1/vehicles/{VIN}/command/...`) with your bearer token;
-- is never retried automatically; on a timeout the result says the state is unknown and which read to use.
+Vehicle commands (hidden unless read-only is explicitly off; signed by your proxy):
+
+| Area | Tools |
+|---|---|
+| Wake | `wake_vehicle` |
+| Climate | `climate_warm_up` (preset), `climate_start`, `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection` |
+| Security | `door_lock`, `door_unlock`, `actuate_trunk`, `set_sentry_mode`, `flash_lights`, `honk_horn` |
+| Charging | `charge_start`, `charge_stop`, `set_charge_limit` (50-100), `set_charging_amps` (1-48; the car caps it), `charge_port_door_open`, `charge_port_door_close` |
+| Navigation | `share_navigation` |
+
+Energy-site commands (same gates; sent directly to the Fleet API, scope `energy_cmds`): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`).
+
+**`climate_warm_up`** makes "turn on the heat" work with no arguments: climate on, then both setpoints to `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`. If the car's cached outside temperature is below the cold threshold it also turns on the default seat heater(s) and (optionally) the steering wheel heater, and below the defrost threshold it turns on max defrost. Override per call with `temp`/`unit`, `seat_heat` (`auto`, `off`, 0-3), `seats` and `defrost` (`auto`, `true`, `false`). Steps run in order and stop at the first failure, reporting `completedSteps`, `failedStep` and `sent: "partial"` when some steps already ran (`failedStepSent` says whether the failed step itself was sent, not sent or unknown). The default 21 °C shows as 70 °F on a car set to Fahrenheit.
+
+### Command safety model
+
+Every command, vehicle or energy:
+- is **absent from `tools/list` and refused** unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed);
+- returns a **dry-run preview** (endpoint and body, zero network calls) unless called with `confirm=true` **and** `user_request` (a short quote of the human's request in the current conversation);
+- validates every parameter **before any network call**;
+- with `TESLA_FLEET_DRY_RUN=1`, goes through all of the above and returns the exact request (`wouldSend`, VIN masked to the last 4, navigation destination not echoed) without sending anything; use this for a first run;
+- is never retried automatically. If the request may have reached the car or site (timeout, 408, any 5xx, or a connection reset after the request started) the result is `state_unknown` with `sent: "unknown"` and the read to use; failures before connecting (refused, DNS, TLS) are `sent: false`.
+
+Vehicle commands additionally:
+- go **only** through your proxy (`/api/1/vehicles/{VIN}/command/...`, HTTPS with optional CA pin; never directly to the Fleet API) with your bearer token;
+- are refused if no proxy is configured, if the vehicle is not already online (no auto-wake), or if the virtual key is not paired (checked first via `fleet_status`, so you are not billed for a rejected command).
+
+Errors are explicit: `vehicle_not_online`, `virtual_key_missing` (with the pairing link), `proxy_not_configured`, `proxy_unreachable` / `proxy_tls_error` (not sent), `missing_scope` / `missing_energy_cmds_scope` (names the scope and the auth-helper flag to add), `state_unknown`, `invalid_arguments`.
+
+Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` (and `energy_device_data`). The default stays read-only.
 
 `door_unlock` and `actuate_trunk` require an explicit `vin`. Local rate limits stay under the documented per-vehicle limits (data 60/min, commands 30/min, wakes 3/min).
 
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
-Out of scope (TODO in `BACKLOG.md`): energy settings commands, Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, horn/lights, media, software updates.
+Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, media, software updates, off-grid vehicle charging reserve.
 
 ## Usage counter (local estimate)
 

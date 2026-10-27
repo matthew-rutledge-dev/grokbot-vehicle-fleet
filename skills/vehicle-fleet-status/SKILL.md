@@ -31,4 +31,4 @@ Read tools need no confirm and never wake the car.
 - No site id: the tools use `TESLA_DEFAULT_ENERGY_SITE_ID` or the only site; with several, call `list_energy_sites` and ask.
 - `missing_energy_scope` or no sites listed: the token lacks `energy_device_data`; the operator re-runs the auth helper with `--energy` and signs in once.
 - Never poll energy tools on a schedule; a local gateway integration is the better source for continuous data.
-- Changing energy settings is not supported.
+- Changing energy settings: skill vehicle-fleet-commands (confirm-gated, needs `energy_cmds`).
