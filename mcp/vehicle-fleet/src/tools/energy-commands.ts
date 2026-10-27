@@ -75,14 +75,29 @@ const SPECS: EnergySpec[] = [
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 /**
- * Success = an object result: {} (what live calls return), {code: 2xx, message} (docs), or
+ * Success = an empty body, or an object result: {} (what live calls return), {response: {}},
+ * {code: 2xx, message} (docs), or
  * another plain result object, optionally inside the {response: ...} envelope. Failure =
  * an `error` key, result === false (with reason), a code >= 400, or a non-object body.
  * The request reached Tesla in every case, so sent is true (rejected) or "unknown".
  */
+export type RawShape = "empty" | "object" | "response-wrapped" | "null" | "string" | "array" | "other";
+
+/** Debug-safe description of the response body: its shape only, never values. */
+export function rawShapeOf(raw: unknown): RawShape {
+  if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) return "empty";
+  if (raw === null) return "null";
+  if (typeof raw === "string") return "string";
+  if (Array.isArray(raw)) return "array";
+  if (isObj(raw)) return "response" in raw ? "response-wrapped" : "object";
+  return "other";
+}
+
 export function interpretEnergyResponse(raw: unknown):
   | { ok: true; result: Record<string, unknown> }
   | { ok: false; failure: Record<string, unknown> } {
+  // An empty (0-byte or whitespace-only) 2xx body counts as success, like {} (0.3.0 behaviour).
+  if (rawShapeOf(raw) === "empty") return { ok: true, result: {} };
   if (!isObj(raw)) {
     return { ok: false, failure: { sent: "unknown", code: "state_unknown", message: `Unexpected ${raw === null ? "null" : typeof raw} response body; the change may or may not have applied.` } };
   }
@@ -149,8 +164,9 @@ function energyTool(spec: EnergySpec): ToolDef {
       try {
         const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
         const outcome = interpretEnergyResponse(raw);
-        if (outcome.ok) return { ok: true, sent: true, command: spec.name, result: outcome.result, readBackWith: "get_energy_site_info" };
-        return { ok: false, command: spec.name, ...outcome.failure, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
+        const rawShape = rawShapeOf(raw);
+        if (outcome.ok) return { ok: true, sent: true, command: spec.name, result: outcome.result, rawShape, readBackWith: "get_energy_site_info" };
+        return { ok: false, command: spec.name, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
       } catch (e) {
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });

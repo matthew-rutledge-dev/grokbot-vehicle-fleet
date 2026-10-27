@@ -136,17 +136,20 @@ test("energy commands: an empty {} response is success; no command proxy needed 
 });
 
 test("energy commands: response bodies - success shapes vs error-shaped 200s", async () => {
-  const cases: Array<[string, unknown, { ok: boolean; sent?: unknown; code?: string; reason?: string }]> = [
-    ["{}", { response: {} }, { ok: true }],
-    ["bare {}", {}, { ok: true }],
-    ["code 201", { response: { code: 201, message: "Updated" } }, { ok: true }],
-    ["plain result", { response: { result: true } }, { ok: true }],
-    ["error key", { error: "invalid_field", error_description: "bad value" }, { ok: false, sent: true, code: "rejected", reason: "invalid_field" }],
-    ["result false", { response: { result: false, reason: "site_offline" } }, { ok: false, sent: true, code: "rejected", reason: "site_offline" }],
-    ["code 400 in body", { response: { code: 400, message: "nope" } }, { ok: false, sent: true, code: "rejected" }],
-    ["string body", "ok", { ok: false, sent: "unknown", code: "state_unknown" }],
-    ["null body", null, { ok: false, sent: "unknown", code: "state_unknown" }],
-    ["null response", { response: null }, { ok: false, sent: "unknown", code: "state_unknown" }],
+  const cases: Array<[string, unknown, { ok: boolean; sent?: unknown; code?: string; reason?: string; shape: string }]> = [
+    ["{response:{}}", { response: {} }, { ok: true, shape: "response-wrapped" }],
+    ["bare {}", {}, { ok: true, shape: "object" }],
+    ["0-byte body", undefined, { ok: true, shape: "empty" }],
+    ["whitespace body", "  \n\t ", { ok: true, shape: "empty" }],
+    ["code 201", { response: { code: 201, message: "Updated" } }, { ok: true, shape: "response-wrapped" }],
+    ["plain result", { response: { result: true } }, { ok: true, shape: "response-wrapped" }],
+    ["error key", { error: "invalid_field", error_description: "bad value" }, { ok: false, sent: true, code: "rejected", reason: "invalid_field", shape: "object" }],
+    ["result false", { response: { result: false, reason: "site_offline" } }, { ok: false, sent: true, code: "rejected", reason: "site_offline", shape: "response-wrapped" }],
+    ["code 400 in body", { response: { code: 400, message: "nope" } }, { ok: false, sent: true, code: "rejected", shape: "response-wrapped" }],
+    ["string body", "ok", { ok: false, sent: "unknown", code: "state_unknown", shape: "string" }],
+    ["null body", null, { ok: false, sent: "unknown", code: "state_unknown", shape: "null" }],
+    ["array body", [1], { ok: false, sent: "unknown", code: "state_unknown", shape: "array" }],
+    ["null response", { response: null }, { ok: false, sent: "unknown", code: "state_unknown", shape: "response-wrapped" }],
   ];
   for (const [label, resBody, want] of cases) {
     const { ctx, calls } = setup(baseEnv(ON), routesFor(["storm_mode"], () => ({ status: 200, body: resBody })));
@@ -154,6 +157,7 @@ test("energy commands: response bodies - success shapes vs error-shaped 200s", a
     const res = await c.callTool({ name: "set_storm_mode", arguments: { enabled: true, ...intent } });
     const b = body(res);
     assert.equal(b.ok, want.ok, label);
+    assert.equal(b.rawShape, want.shape, label);
     if (want.ok) {
       assert.equal(b.sent, true, label);
     } else {
@@ -165,4 +169,14 @@ test("energy commands: response bodies - success shapes vs error-shaped 200s", a
     }
     assert.equal(energyCalls(calls).length, 1, `${label}: not retried`);
   }
+});
+
+test("energy commands: empty and whitespace 2xx bodies are success with rawShape 'empty' (unit)", async () => {
+  const { interpretEnergyResponse, rawShapeOf } = await import("../src/tools/energy-commands.js");
+  for (const raw of [undefined, "", " ", "\r\n\t "]) {
+    assert.deepEqual(interpretEnergyResponse(raw), { ok: true, result: {} }, JSON.stringify(raw));
+    assert.equal(rawShapeOf(raw), "empty");
+  }
+  assert.deepEqual(interpretEnergyResponse({ response: {} }), { ok: true, result: {} });
+  assert.equal(rawShapeOf({ response: { secret: SEED } }), "response-wrapped", "shape only, never values");
 });
