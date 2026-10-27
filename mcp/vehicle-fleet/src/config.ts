@@ -4,6 +4,7 @@
  */
 import os from "node:os";
 import path from "node:path";
+import { resolveExportPath } from "./tokenexport.js";
 import { OFF_VALUES, ON_VALUES, readEnv, readOptInFlag, type Env } from "./env.js";
 import { resolveReadOnly, READ_ONLY_ENV, type ReadOnlyResolution } from "./readonly.js";
 import { DEFAULT_RATES, type Rates } from "./usage.js";
@@ -30,6 +31,7 @@ export const ENV = {
   PROXY_CA_CERT: "TESLA_COMMAND_PROXY_CA_CERT",
   PROXY_CA_CERT_ALIAS: "TESLA_FLEET_PROXY_CA_FILE",
   TOKEN_STORE: "TESLA_TOKEN_STORE",
+  ACCESS_TOKEN_EXPORT_FILE: "TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE",
   READ_ONLY: READ_ONLY_ENV,
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
   LOCATION_PRECISION: "TESLA_FLEET_DEFAULT_LOCATION_PRECISION",
@@ -139,6 +141,8 @@ export type Config = {
   proxyUrl?: string;
   proxyCaCertPath?: string;
   tokenStorePath: string;
+  /** Opt-in: file the current access token is exported to (absolute; undefined = off). */
+  accessTokenExportPath?: string;
   readOnly: ReadOnlyResolution;
   /** get_location listed: on unless TESLA_FLEET_ENABLE_LOCATION is off (or unrecognised). */
   locationEnabled: boolean;
@@ -263,6 +267,10 @@ export function loadConfig(env: Env = process.env): Config {
 
   const rates = Object.freeze(loadRates(env, warnings));
 
+  const tokenStorePath = readEnv(ENV.TOKEN_STORE, env) ?? defaultTokenStorePath(env);
+  const tokenExport = resolveExportPath(readEnv(ENV.ACCESS_TOKEN_EXPORT_FILE, env), tokenStorePath);
+  if (tokenExport.warning) warnings.push(tokenExport.warning);
+
   const clientId = readEnvWithAlias(ENV.CLIENT_ID, ENV.CLIENT_ID_ALIAS, env);
   if (!clientId) problems.push(`${ENV.CLIENT_ID} (or ${ENV.CLIENT_ID_ALIAS}) is not set`);
 
@@ -274,7 +282,8 @@ export function loadConfig(env: Env = process.env): Config {
     authBaseUrl,
     proxyUrl,
     proxyCaCertPath: readEnvWithAlias(ENV.PROXY_CA_CERT, ENV.PROXY_CA_CERT_ALIAS, env),
-    tokenStorePath: readEnv(ENV.TOKEN_STORE, env) ?? defaultTokenStorePath(env),
+    tokenStorePath,
+    accessTokenExportPath: tokenExport.path,
     readOnly,
     locationEnabled: resolveLocation(env, warnings),
     locationPrecision: resolveLocationPrecision(env, warnings),

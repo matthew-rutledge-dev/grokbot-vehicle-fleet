@@ -1,6 +1,6 @@
 {
   "name": "grokbot-vehicle-fleet",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge",
@@ -81,6 +81,11 @@
         "type": "string",
         "title": "Token store path",
         "description": "Optional. Default: GROK_PLUGIN_DATA/tokens.json, else XDG state (Linux/macOS) or LOCALAPPDATA (Windows) under grokbot-vehicle-fleet/. File mode 0600; holds the rotated refresh token only."
+      },
+      "TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE": {
+        "type": "string",
+        "title": "Access-token export file (opt-in)",
+        "description": "Optional, OFF by default. Absolute file path (Windows: drive letter or UNC). While the MCP server runs, it refreshes the access token at startup and about 10 min before each expiry, and writes the raw token string there (no newline, never the refresh token), atomically, mode 0600 (new parent dir 0700). The auth helper does not write it. When the server stops, the file expires within about 8 h. WARNING: the token carries ALL scopes this plugin was granted: vehicle data, full-precision location (regardless of TESLA_FLEET_ENABLE_LOCATION or coarse rounding), and vehicle_cmds / energy_cmds if granted. Anyone who can read the file can act as the plugin. Trusted local consumers on the same host only; never /tmp or a shared or synced folder. Refused if it is relative or resolves to the token store, its lock file or usage.json."
       },
       "TESLA_FLEET_READ_ONLY": {
         "type": "string",

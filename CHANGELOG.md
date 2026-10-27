@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 (unreleased)
+
+- New, opt-in and **off by default**: `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE`. When set to an absolute path, the MCP server (not the auth helper) refreshes once at startup and then about 10 minutes before each access-token expiry, and writes the raw token string there each time (no newline, no JSON, never the refresh token), atomically (temp `0600` + fsync + rename), with a missing parent directory created `0700`. The keep-fresh loop shares the server's single-flight refresh, store lock and auth rate limit, backs off 1/5/15 min on failure, stops on `login_required` (file left as is), and its timer is unref'd. The file stays fresh only while the server runs; after it stops the token expires within about 8 h.
+- Collision guard: a relative path (on Windows, anything but a drive-letter or UNC path), or one that resolves (symlinks followed; case-insensitive on Windows and macOS) to or inside the token store, its lock file or `usage.json`, or an existing target with the same device + inode, is refused with a warning, and the server keeps serving. Re-checked before every write. One safe warning if the parent directory is group- or world-writable. A failed write warns once and continues. The token and path are never logged or returned; `describe_boundary` shows `accessTokenExport: on/off`. Windows: best effort, no ACLs set.
+- Docs: a loud warning that the exported token carries all granted scopes (vehicle data, full-precision location regardless of the location settings, and `vehicle_cmds` / `energy_cmds` if granted; energy commands need no proxy signing), not to use `/tmp` or shared or synced folders, and to prefer a separate read-only sign-in for read-only consumers.
+
 ## 0.3.2 (unreleased)
 
 - Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased); the original text is kept in `rawReason`. The `vcsec could not execute command:` prefix is deliberately not stripped (stays a rejection).
