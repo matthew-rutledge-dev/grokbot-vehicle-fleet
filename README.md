@@ -52,7 +52,7 @@ Then set the plugin variables below and reload MCP servers. Hosts start `node <p
 1. A developer application on developer.tesla.com (client ID/secret), a key pair, and the public key hosted at `https://<your-domain>/.well-known/appspecific/com.tesla.3p.public-key.pem`; partner account registered in your region.
 2. **Set a billing limit** on the developer portal. The Fleet API is pay-per-use and bills every response below HTTP 500.
 3. A refresh token from your own consent (`scripts/auth-helper.mjs`, see skill `vehicle-fleet-setup`).
-4. Only for commands: your own `tesla-http-proxy` (from Tesla's `vehicle-command` project), and your virtual key paired with the vehicle via `https://www.tesla.com/_ak/<your-domain>`.
+4. Only for vehicle commands: your own `tesla-http-proxy` (from Tesla's `vehicle-command` project), and your virtual key paired with the vehicle via `https://www.tesla.com/_ak/<your-domain>`. Step-by-step proxy setup (pinned official Docker image, self-signed CA and SAN, loopback/LAN-only binding, health check, first test) is in `skills/vehicle-fleet-setup/SKILL.md`, section 3. The proxy has **no client authentication**: keep it on loopback or a firewalled LAN, never on the internet.
 
 Use the smallest scopes: read-only `openid offline_access vehicle_device_data vehicle_location` (the auth helper's default; `url --no-location` or `TESLA_AUTH_LOCATION=0` drops `vehicle_location` if you opt out of location); add `energy_device_data` only for energy-site reads (`node scripts/auth-helper.mjs url --energy`, or `TESLA_AUTH_ENERGY=1`), `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
 

@@ -1,7 +1,7 @@
 {
   "name": "grokbot-vehicle-fleet",
   "displayName": "Grok Bot Vehicle Fleet",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge"

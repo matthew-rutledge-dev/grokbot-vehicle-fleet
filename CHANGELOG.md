@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 (unreleased)
+
+- Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased) for every known no-op reason; the original text is kept in `rawReason`.
+- Docs: full generic `tesla-http-proxy` walkthrough in the setup skill (pinned official image or release build, self-signed CA and SAN, loopback/LAN-only binding, health check, dry-run then fleet_status then flash_lights), and a README pointer noting the proxy has no client authentication.
+
 ## 0.3.1 (unreleased)
 
 - **Location is on by default** (the server runs for its owner). `get_location` is listed unless `TESLA_FLEET_ENABLE_LOCATION` is `0`/`false`/`no`/`off`; an unrecognised value turns location off with a warning. Coarse (~1 km) stays the default; new `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` (`coarse`/`precise`). An invalid `precision` argument is refused before any network call (no token refresh or vehicle lookup).

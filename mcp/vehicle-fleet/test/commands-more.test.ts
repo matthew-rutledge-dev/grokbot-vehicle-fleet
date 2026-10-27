@@ -302,3 +302,41 @@ test("proxy_not_configured hint names the variable and its alias", async () => {
   assert.match(String(b.hint), /TESLA_COMMAND_PROXY_URL/);
   assert.match(String(b.hint), /TESLA_FLEET_PROXY_URL/);
 });
+
+test("no-op reasons: proxy-prefixed and bare forms are noChange; raw reason kept; unrelated stays rejected", async () => {
+  const cases: Array<[string, boolean, string]> = [
+    ["car could not execute command: already_set", true, "already_set"],
+    ["Car could not execute command:   already_set  ", true, "already_set"],
+    ["already_set", true, "already_set"],
+    ["car could not execute command: is_charging", true, "is_charging"],
+    ["car could not execute command: complete", true, "complete"],
+    ["car could not execute command: not_charging", true, "not_charging"],
+    ["car could not execute command: disconnected", true, "disconnected"],
+    ["requested", true, "requested"],
+    ["car could not execute command: user_present", false, "user_present"],
+    ["car could not execute command: already_set_but_not_really", false, "already_set_but_not_really"],
+    ["car could not execute command: constructor", false, "constructor"],
+  ];
+  for (const [raw, noop, norm] of cases) {
+    const { ctx } = setup(baseEnv(ON), {
+      [`POST ${PROXY}/api/1/vehicles/${VIN}/command/set_charge_limit`]: () => ({ status: 200, body: { response: { result: false, reason: raw } } }),
+    });
+    const c = await connect(ctx);
+    const b = body(await c.callTool({ name: "set_charge_limit", arguments: { percent: 80, ...intent } }));
+    assert.equal(b.ok, noop, raw);
+    assert.equal(b.reason, norm, raw);
+    assert.equal(b.rawReason, raw, `${raw}: raw reason kept`);
+    if (noop) assert.equal(b.noChange, true, raw);
+    else assert.match(String(b.message), /Vehicle rejected the command/, raw);
+  }
+});
+
+test("no-op reason mid warm-up counts as done, not a failure", async () => {
+  const { ctx } = setup(baseEnv(ON), {
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/auto_conditioning_start`]: () => ({ status: 200, body: { response: { result: false, reason: "car could not execute command: already_set" } } }),
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/set_temps`]: () => ({ status: 200, body: { response: { result: true, reason: "" } } }),
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "climate_warm_up", arguments: { ...intent, seat_heat: "off", defrost: false } }));
+  assert.equal(b.ok, true);
+});

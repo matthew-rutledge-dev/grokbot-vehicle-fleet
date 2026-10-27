@@ -116,6 +116,17 @@ export function mapFleetError(
 }
 
 /** Friendly reading of command `reason` values documented on the commands page. */
+/**
+ * tesla-http-proxy wraps the car's reason as "car could not execute command: <reason>"
+ * (vehicle-command pkg/vehicle/infotainment.go). Strip that prefix (any case), trim and
+ * lower-case so "already_set" matches in both forms.
+ */
+export const PROXY_REASON_PREFIX = /^\s*car could not execute command:\s*/i;
+export function normalizeCommandReason(reason: unknown): string {
+  if (typeof reason !== "string") return "";
+  return reason.replace(PROXY_REASON_PREFIX, "").trim().toLowerCase();
+}
+
 export const BENIGN_COMMAND_REASONS: Record<string, string> = {
   already_set: "Already at the requested value.",
   is_charging: "Already charging.",

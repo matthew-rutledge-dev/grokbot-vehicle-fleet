@@ -30,14 +30,99 @@ node scripts/auth-helper.mjs exchange "<full redirect URL>"
 
 The helper writes the token store (0600) and prints no secrets. Alternatively set `TESLA_REFRESH_TOKEN` as a plugin variable.
 
-## 3. Command proxy (only if commands are wanted)
+## 3. Command proxy (only if vehicle commands are wanted)
 
-Run Tesla's `tesla-http-proxy` (from `teslamotors/vehicle-command`) yourself, bound to loopback or a private host, with your private key and a TLS cert whose SAN matches the host. Then set:
+Vehicle commands must be signed by Tesla's `tesla-http-proxy` from [teslamotors/vehicle-command](https://github.com/teslamotors/vehicle-command). The operator runs it; the plugin never downloads, builds or starts it. Energy-site commands do not use it. Placeholders: host `proxy.example.com`, port `4443` (Tesla's example), paths under `./config`.
 
-- `TESLA_COMMAND_PROXY_URL=https://proxy.example.com:4443`
-- `TESLA_COMMAND_PROXY_CA_CERT=/path/to/proxy-ca-or-cert.pem` (alias `TESLA_FLEET_PROXY_CA_FILE`)
+**Security first.** The proxy has no client authentication of its own: anyone who can reach it and holds a valid OAuth token for your account can send commands signed with your key. Bind it to loopback, or to a LAN address with a firewall limiting it to the machine that runs the MCP server. **Never expose it to the internet** (no port forwarding, no public tunnel).
 
-The plugin never downloads, builds, or starts the proxy.
+### 3a. Files in `./config`
+
+- `fleet-key.pem`: the private key from step 1 (the one whose public key you host). Keep it `chmod 600`.
+- `tls-key.pem` / `tls-cert.pem`: the proxy's TLS server key and certificate chain.
+
+For a self-signed setup, make a small CA and a server cert whose SAN matches the host name the MCP server will use:
+
+```bash
+mkdir -p config && cd config
+# CA (keep ca-key.pem offline/private)
+openssl req -x509 -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -subj '/CN=Example Proxy CA' -keyout ca-key.pem -out ca-cert.pem -sha256 -days 3650 \
+  -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
+# Server key + CSR
+openssl req -nodes -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 \
+  -subj '/CN=proxy.example.com' -keyout tls-key.pem -out server.csr
+# Server cert signed by the CA, SAN = the host name you will put in TESLA_COMMAND_PROXY_URL
+printf 'subjectAltName=DNS:proxy.example.com\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyAgreement\n' > server.ext
+openssl x509 -req -in server.csr -CA ca-cert.pem -CAkey ca-key.pem -CAcreateserial \
+  -out tls-cert.pem -days 825 -sha256 -extfile server.ext
+chmod 600 ca-key.pem tls-key.pem fleet-key.pem
+```
+
+(For `localhost` only, the vehicle-command README's single self-signed `openssl req -x509 ... -subj '/CN=localhost'` command is enough; then `tls-cert.pem` itself is the file to trust.) If you use an IP address instead of a name, use `subjectAltName=IP:<address>`.
+
+### 3b. Run it (official image, pinned)
+
+Use the official Docker image `tesla/vehicle-command`, pinned to a release tag (e.g. `0.4.1`; check the repo's releases) rather than `latest`. The image's entrypoint is `tesla-http-proxy`; the flags below are the ones in the official README (`-tls-key`, `-cert`, `-key-file`, `-host`, `-port`).
+
+```bash
+docker run -d --name tesla-http-proxy --restart unless-stopped \
+  --security-opt=no-new-privileges:true \
+  -v "$PWD/config:/config:ro" \
+  -p 127.0.0.1:4443:4443 \
+  tesla/vehicle-command:0.4.1 \
+  -tls-key /config/tls-key.pem -cert /config/tls-cert.pem -key-file /config/fleet-key.pem \
+  -host 0.0.0.0 -port 4443
+```
+
+`-host 0.0.0.0` is inside the container; the `-p 127.0.0.1:4443:4443` publish is what limits who can reach it. For a LAN-only host, publish on that LAN address instead and firewall it to the MCP machine.
+
+Compose equivalent (the official `docker-compose.yml` uses these environment variables):
+
+```yaml
+services:
+  tesla_http_proxy:
+    image: tesla/vehicle-command:0.4.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4443:4443"
+    environment:
+      - TESLA_HTTP_PROXY_TLS_CERT=/config/tls-cert.pem
+      - TESLA_HTTP_PROXY_TLS_KEY=/config/tls-key.pem
+      - TESLA_HTTP_PROXY_HOST=0.0.0.0
+      - TESLA_HTTP_PROXY_PORT=4443
+      - TESLA_HTTP_PROXY_TIMEOUT=10s
+      - TESLA_KEY_FILE=/config/fleet-key.pem
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./config:/config:ro
+```
+
+Without Docker, the same flags work on a release build: `tesla-http-proxy -tls-key config/tls-key.pem -cert config/tls-cert.pem -key-file config/fleet-key.pem -host 127.0.0.1 -port 4443`.
+
+### 3c. Health check (no token, nothing sent to a car)
+
+```bash
+# TLS verifies against your CA and the SAN matches; prints OK
+curl --cacert config/ca-cert.pem https://proxy.example.com:4443/health
+# A request without a token is refused by the proxy with 403
+curl --cacert config/ca-cert.pem -o /dev/null -w '%{http_code}\n' -X POST \
+  https://proxy.example.com:4443/api/1/vehicles/5YJ000000EXAMPLE/command/flash_lights
+```
+
+If the first command fails with a certificate error, fix the SAN or the CA file before going further (the plugin never disables TLS verification).
+
+### 3d. Point the plugin at it
+
+- `TESLA_COMMAND_PROXY_URL=https://proxy.example.com:4443` (alias `TESLA_FLEET_PROXY_URL`)
+- `TESLA_COMMAND_PROXY_CA_CERT=/path/to/config/ca-cert.pem` (alias `TESLA_FLEET_PROXY_CA_FILE`): the CA (or the self-signed cert) to trust for the proxy only.
+
+### 3e. First test, in order
+
+1. `TESLA_FLEET_READ_ONLY=false` and `TESLA_FLEET_DRY_RUN=1`, reload, and ask for e.g. `flash_lights` with confirm: the result shows `wouldSend` and nothing is sent.
+2. `get_fleet_status`: the virtual key must show as paired (step 4); `describe_boundary` should show `proxyConfigured: true`.
+3. Unset `TESLA_FLEET_DRY_RUN`, reload, car awake on its own, then one harmless live command with the user's yes: `flash_lights`. Errors: `proxy_unreachable` (not running / wrong host), `proxy_tls_error` (CA or SAN), `virtual_key_missing` (pair first).
 
 ## 4. Pair the virtual key
 

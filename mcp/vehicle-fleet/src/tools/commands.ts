@@ -8,7 +8,7 @@
  * (never auto-wake) -> virtual key paired (fleet_status, cached) -> POST via
  * proxy -> map result. No automatic retry; timeouts return "state unknown".
  */
-import { BENIGN_COMMAND_REASONS, FleetApiError, LocalRefusal } from "../errors.js";
+import { BENIGN_COMMAND_REASONS, FleetApiError, LocalRefusal, normalizeCommandReason } from "../errors.js";
 import { COMMAND_REQUEST_ERRORS } from "../http.js";
 import { maskVin } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
@@ -412,10 +412,12 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
   for (const s of steps) {
     try {
       const r = await ctx.fleet.command(vin, s.endpoint, s.body);
-      const reason = r.reason ?? "";
+      const rawReason = typeof r.reason === "string" ? r.reason : "";
+      const reason = normalizeCommandReason(rawReason);
+      const raw = rawReason ? { rawReason } : {};
       if (r.result === true) { done.push({ endpoint: s.endpoint, ok: true }); continue; }
-      if (BENIGN_COMMAND_REASONS[reason]) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, message: BENIGN_COMMAND_REASONS[reason] }); continue; }
-      const fail = { ok: false, sent: true as boolean | "partial", command: o.name, vinLast4: vin.slice(-4), reason, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
+      if (Object.hasOwn(BENIGN_COMMAND_REASONS, reason)) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, ...raw, message: BENIGN_COMMAND_REASONS[reason] }); continue; }
+      const fail = { ok: false, sent: true as boolean | "partial", command: o.name, vinLast4: vin.slice(-4), reason, ...raw, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
       return multi ? { ...fail, ...(done.length ? { sent: "partial", failedStepSent: true } : {}), failedStep: s.endpoint, completedSteps: done } : fail;
     } catch (e) {
       const partial = multi ? { failedStep: s.endpoint, completedSteps: done } : {};
@@ -439,7 +441,7 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
   if (!multi) {
     const d = done[0];
     return d.noChange
-      ? { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), noChange: true, reason: d.reason, message: d.message }
+      ? { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), noChange: true, reason: d.reason, ...(d.rawReason ? { rawReason: d.rawReason } : {}), message: d.message }
       : { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), readBackWith: o.readBack };
   }
   return { ok: true, sent: true, command: o.name, vinLast4: vin.slice(-4), steps: done, ...(noChange ? { noChange: true } : {}), readBackWith: o.readBack };
