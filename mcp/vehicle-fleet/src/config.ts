@@ -31,6 +31,7 @@ export const ENV = {
   TOKEN_STORE: "TESLA_TOKEN_STORE",
   READ_ONLY: READ_ONLY_ENV,
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
+  LOCATION_PRECISION: "TESLA_FLEET_DEFAULT_LOCATION_PRECISION",
   DEFAULT_VIN: "TESLA_DEFAULT_VIN",
   DEFAULT_ENERGY_SITE: "TESLA_DEFAULT_ENERGY_SITE_ID",
   DRY_RUN: "TESLA_FLEET_DRY_RUN",
@@ -64,6 +65,30 @@ export type ClimateDefaults = {
 export const DEFAULT_CLIMATE: ClimateDefaults = Object.freeze({
   tempC: 21, seatLevel: 2, seats: "driver", coldBelowC: 5, defrostBelowC: -2, wheelWhenCold: true,
 });
+
+/**
+ * Location is on by default (the server runs for its owner). Unset = on; on values = on;
+ * off values = off. An unrecognised value = OFF with a warning: setting the variable at all
+ * signals an intent to change the default (most likely an opt-out such as "disabled"),
+ * and a wrong guess toward "on" would expose location, while "off" only hides one read.
+ */
+function resolveLocation(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.ENABLE_LOCATION, env);
+  if (v === undefined) return true;
+  const l = v.toLowerCase();
+  if (ON_VALUES.includes(l)) return true;
+  if (OFF_VALUES.includes(l)) return false;
+  warnings.push(`${ENV.ENABLE_LOCATION} has an unrecognised value; location is OFF. Use 1/true/on or 0/false/off.`);
+  return false;
+}
+
+function resolveLocationPrecision(env: Env, warnings: string[]): "coarse" | "precise" {
+  const v = readEnv(ENV.LOCATION_PRECISION, env)?.toLowerCase();
+  if (v === undefined || v === "coarse") return "coarse";
+  if (v === "precise") return "precise";
+  warnings.push(`${ENV.LOCATION_PRECISION} must be coarse or precise; using coarse.`);
+  return "coarse";
+}
 
 /** TESLA_FLEET_DRY_RUN fails closed: unset/off values = off, on values = on, anything else = on + warning. */
 function resolveDryRun(env: Env, warnings: string[]): boolean {
@@ -114,7 +139,10 @@ export type Config = {
   proxyCaCertPath?: string;
   tokenStorePath: string;
   readOnly: ReadOnlyResolution;
+  /** get_location listed: on unless TESLA_FLEET_ENABLE_LOCATION is off (or unrecognised). */
   locationEnabled: boolean;
+  /** get_location precision when the call does not pass one (default coarse). */
+  locationPrecision: "coarse" | "precise";
   defaultVin?: string;
   /** Optional default energy_site_id for energy reads. */
   defaultEnergySiteId?: string;
@@ -247,7 +275,8 @@ export function loadConfig(env: Env = process.env): Config {
     proxyCaCertPath: readEnv(ENV.PROXY_CA_CERT, env),
     tokenStorePath: readEnv(ENV.TOKEN_STORE, env) ?? defaultTokenStorePath(env),
     readOnly,
-    locationEnabled: readOptInFlag(ENV.ENABLE_LOCATION, env),
+    locationEnabled: resolveLocation(env, warnings),
+    locationPrecision: resolveLocationPrecision(env, warnings),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
     defaultEnergySiteId: readEnv(ENV.DEFAULT_ENERGY_SITE, env),
     dryRun: resolveDryRun(env, warnings),

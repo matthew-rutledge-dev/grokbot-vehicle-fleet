@@ -65,7 +65,7 @@ export function createServer(ctx: ToolContext): Server {
       }
       return jsonResult({
         ok: false, locationEnabled: false,
-        error: `Refused: ${name} needs ${ENV_LOCATION_NAME} on (opt-in). Nothing was read.`,
+        error: `Refused: ${name} is turned off (${ENV_LOCATION_NAME} is set to off or an unrecognised value). Nothing was read.`,
       }, true);
     }
     try {

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.1 (unreleased)
+
+- **Location is on by default** (the server runs for its owner). `get_location` is listed unless `TESLA_FLEET_ENABLE_LOCATION` is `0`/`false`/`no`/`off`; an unrecognised value turns location off with a warning. Coarse (~1 km) stays the default; new `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` (`coarse`/`precise`). Invalid `precision` arguments are refused before any call.
+- `get_location` reports `missing_location_scope` with the fix when the token lacks `vehicle_location`.
+- Auth helper: `vehicle_location` is now in the default scopes; `url --no-location` / `TESLA_AUTH_LOCATION=0` drops it.
+- Energy commands: an empty `{}` response is success (seen live); `result` is passed through as returned. Docs: energy commands are unsigned and need no command proxy (verified live).
+- Tool counts: 16 read-only, 42 with commands on (one fewer each with location off).
+
 ## 0.3.0 (unreleased)
 
 Command tools. Still read-only by default; every command stays hidden and refused unless `TESLA_FLEET_READ_ONLY` is explicitly off.

@@ -16,10 +16,12 @@ function scopesFor(args: string[], extra: Record<string, string> = {}): string {
   return new URL(url).searchParams.get("scope") ?? "";
 }
 
-test("auth helper: default scopes are read-only; command scopes only on opt-in", () => {
-  assert.equal(scopesFor([]), "openid offline_access vehicle_device_data");
-  assert.equal(scopesFor(["--commands"]), "openid offline_access vehicle_device_data vehicle_cmds vehicle_charging_cmds");
-  assert.equal(scopesFor(["--energy-commands"]), "openid offline_access vehicle_device_data energy_device_data energy_cmds");
-  assert.equal(scopesFor([], { TESLA_AUTH_COMMANDS: "1", TESLA_AUTH_ENERGY: "1" }), "openid offline_access vehicle_device_data energy_device_data vehicle_cmds vehicle_charging_cmds");
+test("auth helper: default scopes are read-only (incl. location, opt-out); command scopes only on opt-in", () => {
+  assert.equal(scopesFor([]), "openid offline_access vehicle_device_data vehicle_location");
+  assert.equal(scopesFor(["--commands"]), "openid offline_access vehicle_device_data vehicle_location vehicle_cmds vehicle_charging_cmds");
+  assert.equal(scopesFor(["--energy-commands"]), "openid offline_access vehicle_device_data vehicle_location energy_device_data energy_cmds");
+  assert.equal(scopesFor([], { TESLA_AUTH_COMMANDS: "1", TESLA_AUTH_ENERGY: "1" }), "openid offline_access vehicle_device_data vehicle_location energy_device_data vehicle_cmds vehicle_charging_cmds");
+  assert.equal(scopesFor(["--no-location"]), "openid offline_access vehicle_device_data");
+  assert.equal(scopesFor([], { TESLA_AUTH_LOCATION: "off" }), "openid offline_access vehicle_device_data");
   assert.throws(() => scopesFor(["--everything"]));
 });

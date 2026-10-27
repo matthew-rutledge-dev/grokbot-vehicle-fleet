@@ -1,7 +1,7 @@
 /**
  * Tool registry for the single vehicle-fleet MCP server.
  * - read tools: always listed
- * - location tools: listed only with TESLA_FLEET_ENABLE_LOCATION on
+ * - location tools: listed unless TESLA_FLEET_ENABLE_LOCATION is off (default on)
  * - command tools: listed only when read-only is explicitly off (fail closed)
  * Hidden tools are also refused at call time.
  */

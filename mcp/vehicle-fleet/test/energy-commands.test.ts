@@ -117,3 +117,20 @@ test("energy commands: 5xx or reset mid-request = state_unknown; refused connect
     assert.equal(energyCalls(calls).length, 1, "not retried");
   }
 });
+
+test("energy commands: an empty {} response is success; no command proxy needed (sent unsigned)", async () => {
+  const env = baseEnv(ON);
+  delete (env as Record<string, string | undefined>).TESLA_COMMAND_PROXY_URL;
+  const { ctx, calls } = setup(env, routesFor(["backup", "operation", "storm_mode"], () => ({ status: 200, body: { response: {} } })));
+  const c = await connect(ctx);
+  for (const [tool, args] of [["set_backup_reserve", { backup_reserve_percent: 15 }], ["set_operation_mode", { default_real_mode: "self_consumption" }], ["set_storm_mode", { enabled: true }]] as const) {
+    const b = body(await c.callTool({ name: tool, arguments: { ...args, ...intent } }));
+    assert.equal(b.ok, true, tool);
+    assert.equal(b.sent, true);
+    assert.deepEqual(b.result, {});
+  }
+  const sent = energyCalls(calls);
+  assert.equal(sent.length, 3);
+  assert.ok(sent.every((x) => x.url.startsWith(BASE) && x.dispatcher === undefined));
+  assert.ok(!calls.some((x) => x.url.includes("proxy.example.com")));
+});

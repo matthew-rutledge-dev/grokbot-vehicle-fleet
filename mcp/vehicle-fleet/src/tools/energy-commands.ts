@@ -1,6 +1,6 @@
 /**
  * Energy-site setting commands (Powerwall). Sent directly to the Fleet API
- * (POST /api/1/energy_sites/{id}/...); they are not signed by the vehicle proxy.
+ * (POST /api/1/energy_sites/{id}/...), unsigned; no command proxy is needed (verified live).
  * Same gates as vehicle commands: hidden and refused unless read-only is explicitly
  * off, confirm=true + user_request, TESLA_FLEET_DRY_RUN honoured, no retries.
  * Scope: energy_cmds.
@@ -121,7 +121,8 @@ function energyTool(spec: EnergySpec): ToolDef {
         if (code !== undefined && code >= 400) {
           return { ok: false, sent: true, command: spec.name, code, message: typeof r.message === "string" ? r.message : "Rejected by the site" };
         }
-        return { ok: true, sent: true, command: spec.name, result: { code, message: r.message }, readBackWith: "get_energy_site_info" };
+        // Live responses are an empty object ({}); some docs show {code: 201, message: "Updated"}. Both are success.
+        return { ok: true, sent: true, command: spec.name, result: r, readBackWith: "get_energy_site_info" };
       } catch (e) {
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });
