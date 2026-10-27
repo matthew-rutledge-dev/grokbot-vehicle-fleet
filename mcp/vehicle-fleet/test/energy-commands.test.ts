@@ -117,3 +117,66 @@ test("energy commands: 5xx or reset mid-request = state_unknown; refused connect
     assert.equal(energyCalls(calls).length, 1, "not retried");
   }
 });
+
+test("energy commands: an empty {} response is success; no command proxy needed (sent unsigned)", async () => {
+  const env = baseEnv(ON);
+  delete (env as Record<string, string | undefined>).TESLA_COMMAND_PROXY_URL;
+  const { ctx, calls } = setup(env, routesFor(["backup", "operation", "storm_mode"], () => ({ status: 200, body: { response: {} } })));
+  const c = await connect(ctx);
+  for (const [tool, args] of [["set_backup_reserve", { backup_reserve_percent: 15 }], ["set_operation_mode", { default_real_mode: "self_consumption" }], ["set_storm_mode", { enabled: true }]] as const) {
+    const b = body(await c.callTool({ name: tool, arguments: { ...args, ...intent } }));
+    assert.equal(b.ok, true, tool);
+    assert.equal(b.sent, true);
+    assert.deepEqual(b.result, {});
+  }
+  const sent = energyCalls(calls);
+  assert.equal(sent.length, 3);
+  assert.ok(sent.every((x) => x.url.startsWith(BASE) && x.dispatcher === undefined));
+  assert.ok(!calls.some((x) => x.url.includes("proxy.example.com")));
+});
+
+test("energy commands: response bodies - success shapes vs error-shaped 200s", async () => {
+  const cases: Array<[string, unknown, { ok: boolean; sent?: unknown; code?: string; reason?: string; shape: string }]> = [
+    ["{response:{}}", { response: {} }, { ok: true, shape: "response-wrapped" }],
+    ["bare {}", {}, { ok: true, shape: "object" }],
+    ["0-byte body", undefined, { ok: true, shape: "empty" }],
+    ["whitespace body", "  \n\t ", { ok: true, shape: "empty" }],
+    ["code 201", { response: { code: 201, message: "Updated" } }, { ok: true, shape: "response-wrapped" }],
+    ["plain result", { response: { result: true } }, { ok: true, shape: "response-wrapped" }],
+    ["error key", { error: "invalid_field", error_description: "bad value" }, { ok: false, sent: true, code: "rejected", reason: "invalid_field", shape: "object" }],
+    ["result false", { response: { result: false, reason: "site_offline" } }, { ok: false, sent: true, code: "rejected", reason: "site_offline", shape: "response-wrapped" }],
+    ["code 400 in body", { response: { code: 400, message: "nope" } }, { ok: false, sent: true, code: "rejected", shape: "response-wrapped" }],
+    ["string body", "ok", { ok: false, sent: "unknown", code: "state_unknown", shape: "string" }],
+    ["null body", null, { ok: false, sent: "unknown", code: "state_unknown", shape: "null" }],
+    ["array body", [1], { ok: false, sent: "unknown", code: "state_unknown", shape: "array" }],
+    ["null response", { response: null }, { ok: false, sent: "unknown", code: "state_unknown", shape: "response-wrapped" }],
+  ];
+  for (const [label, resBody, want] of cases) {
+    const { ctx, calls } = setup(baseEnv(ON), routesFor(["storm_mode"], () => ({ status: 200, body: resBody })));
+    const c = await connect(ctx);
+    const res = await c.callTool({ name: "set_storm_mode", arguments: { enabled: true, ...intent } });
+    const b = body(res);
+    assert.equal(b.ok, want.ok, label);
+    assert.equal(b.rawShape, want.shape, label);
+    if (want.ok) {
+      assert.equal(b.sent, true, label);
+    } else {
+      assert.equal(b.sent, want.sent, label);
+      assert.equal(b.code, want.code, label);
+      if (want.reason !== undefined) assert.equal(b.reason, want.reason, label);
+      assert.doesNotMatch(String(b.hint), /try again|retry it|resend/i, label);
+      assert.match(String(b.hint), /get_energy_site_info/, label);
+    }
+    assert.equal(energyCalls(calls).length, 1, `${label}: not retried`);
+  }
+});
+
+test("energy commands: empty and whitespace 2xx bodies are success with rawShape 'empty' (unit)", async () => {
+  const { interpretEnergyResponse, rawShapeOf } = await import("../src/tools/energy-commands.js");
+  for (const raw of [undefined, "", " ", "\r\n\t "]) {
+    assert.deepEqual(interpretEnergyResponse(raw), { ok: true, result: {} }, JSON.stringify(raw));
+    assert.equal(rawShapeOf(raw), "empty");
+  }
+  assert.deepEqual(interpretEnergyResponse({ response: {} }), { ok: true, result: {} });
+  assert.equal(rawShapeOf({ response: { secret: SEED } }), "response-wrapped", "shape only, never values");
+});

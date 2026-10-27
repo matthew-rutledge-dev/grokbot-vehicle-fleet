@@ -63,8 +63,63 @@ test("cached 404 gives a clean hint", async () => {
   assert.match(String(b.hint), /live=true/);
 });
 
-test("location hidden by default and refused at call time", async () => {
-  const { ctx, calls } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }));
+test("location opt-out: off or unrecognised value hides and refuses get_location", async () => {
+  for (const v of ["0", "off", "disabled"]) {
+    const { ctx, calls } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN, TESLA_FLEET_ENABLE_LOCATION: v }));
+    const c = await connect(ctx);
+    const names = (await c.listTools()).tools.map((t) => t.name);
+    assert.ok(!names.includes("get_location"), v);
+    const res = await c.callTool({ name: "get_location", arguments: {} });
+    assert.equal(isError(res), true);
+    assert.equal(body(res).locationEnabled, false);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("location on by default (unset / placeholder): listed and readable, coarse", async () => {
+  for (const extra of [{}, { TESLA_FLEET_ENABLE_LOCATION: "${TESLA_FLEET_ENABLE_LOCATION}" }] as Array<Record<string, string>>) {
+    const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN, ...extra }));
+    const c = await connect(ctx);
+    assert.ok((await c.listTools()).tools.some((t) => t.name === "get_location"));
+    const b = body(await c.callTool({ name: "get_location", arguments: {} }));
+    assert.equal(b.ok, true);
+    assert.equal(b.precision, "coarse");
+    assert.equal(b.latitude, 37.12);
+  }
+});
+
+test("location: env default precision, invalid precision refused, missing scope names vehicle_location", async () => {
+  {
+    const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN, TESLA_FLEET_DEFAULT_LOCATION_PRECISION: "precise" }));
+    const c = await connect(ctx);
+    const b = body(await c.callTool({ name: "get_location", arguments: {} }));
+    assert.equal(b.precision, "precise");
+    assert.equal(b.latitude, 37.12346);
+    assert.equal(body(await c.callTool({ name: "get_location", arguments: { precision: "coarse" } })).latitude, 37.12);
+  }
+  {
+    const { ctx, calls } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }));
+    const c = await connect(ctx);
+    for (const precision of ["exact", 5, ""]) {
+      const res = await c.callTool({ name: "get_location", arguments: { precision } });
+      assert.equal(body(res).code, "invalid_arguments", String(precision));
+    }
+    assert.equal(calls.length, 0, "no token refresh, vehicle lookup or data call on invalid precision");
+  }
+  {
+    const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }), {
+      [`GET ${BASE}/api/1/vehicles/${VIN}/vehicle_data`]: () => ({ status: 403, body: { error: "unauthorized_missing_scopes", error_description: "missing scopes" } }),
+    });
+    const c = await connect(ctx);
+    const b = body(await c.callTool({ name: "get_location", arguments: {} }));
+    assert.equal(b.code, "missing_location_scope");
+    assert.match(String(b.hint), /vehicle_location/);
+    assert.match(String(b.hint), /TESLA_FLEET_ENABLE_LOCATION=0/);
+  }
+});
+
+test("location hidden when turned off (legacy check)", async () => {
+  const { ctx, calls } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN, TESLA_FLEET_ENABLE_LOCATION: "false" }));
   const c = await connect(ctx);
   const names = (await c.listTools()).tools.map((t) => t.name);
   assert.ok(!names.includes("get_location"));

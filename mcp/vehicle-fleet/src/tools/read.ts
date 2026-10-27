@@ -1,6 +1,6 @@
 /** Read tools: no confirm, never wake the vehicle. */
 import { configPresence } from "../config.js";
-import { FleetApiError } from "../errors.js";
+import { FleetApiError, LocalRefusal } from "../errors.js";
 import { describeReadOnly } from "../readonly.js";
 import { maskVin, roundCoord } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
@@ -21,7 +21,7 @@ export const RULES_SUMMARY = [
   "Vehicle commands go only through your signing proxy (HTTPS, optional CA pin); never directly. No automatic retries.",
   "Energy-site commands go directly to the Fleet API and need the energy_cmds scope.",
   "TESLA_FLEET_DRY_RUN=1 validates confirmed commands and returns the exact request without sending it.",
-  "Location is off unless TESLA_FLEET_ENABLE_LOCATION is on, and coarse by default.",
+  "Location is on by default (opt out with TESLA_FLEET_ENABLE_LOCATION=0) and coarse (~1 km) unless precise is asked for.",
 ];
 
 type Section = "charge" | "climate" | "closures" | "tires";
@@ -98,13 +98,14 @@ export const READ_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "describe_boundary",
-      description: "Shows what this server will and will not do: read-only state, location opt-in, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
+      description: "Shows what this server will and will not do: read-only state, location on/off (on by default) and default precision, dry-run mode, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async (_args, ctx) => ({
       readOnly: ctx.config.readOnly.readOnly,
       readOnlyStatus: describeReadOnly(ctx.config.readOnly),
       locationEnabled: ctx.config.locationEnabled,
+      locationDefaultPrecision: ctx.config.locationPrecision,
       proxyConfigured: Boolean(ctx.config.proxyUrl),
       proxyCaConfigured: Boolean(ctx.config.proxyCaCertPath),
       regionConfigured: ctx.config.region ?? (ctx.config.baseUrl ? "custom base URL" : "auto-detect"),
@@ -211,23 +212,36 @@ export const READ_TOOLS: ToolDef[] = [
     kind: "location",
     tool: {
       name: "get_location",
-      description: "Vehicle location (live location_data; vehicle must already be online; never wakes). Coarse (~1 km) by default; precision=precise only when the user explicitly asks. The vehicle shows a location-sharing indicator on each read. Listed only when TESLA_FLEET_ENABLE_LOCATION is on.",
+      description: "Vehicle location (live location_data; vehicle must already be online; never wakes; needs the vehicle_location scope). Coarse (2 decimals, ~1 km) by default; precision=precise (5 decimals, ~1 m, plus heading) only when the user explicitly asks. The vehicle shows a location-sharing indicator on each read. Hidden when TESLA_FLEET_ENABLE_LOCATION is off.",
       inputSchema: {
         type: "object",
         properties: {
           ...VIN_PROP,
-          precision: { type: "string", enum: ["coarse", "precise"], description: "Default coarse." },
+          precision: { type: "string", enum: ["coarse", "precise"], description: "Default coarse (or TESLA_FLEET_DEFAULT_LOCATION_PRECISION)." },
         },
       },
     },
     handler: async (args, ctx) => {
+      // Validate before any network call (token refresh, vehicle list, state).
+      if (args.precision !== undefined && args.precision !== "coarse" && args.precision !== "precise") {
+        throw new LocalRefusal("invalid_arguments", "precision must be coarse or precise; nothing was read.");
+      }
       const vin = await ctx.fleet.resolveVin(args.vin);
       const v = await ctx.fleet.requireOnline(vin);
       if (v.granular_access?.hide_private) {
         return { ok: false, vinLast4: vin.slice(-4), code: "location_hidden", message: "This vehicle share hides location (hide_private)." };
       }
-      const precision = args.precision === "precise" ? "precise" : "coarse";
-      const { data } = await ctx.fleet.vehicleDataLive(vin, ["location_data", "drive_state"]);
+      const precision = (args.precision as "coarse" | "precise" | undefined) ?? ctx.config.locationPrecision;
+      let data: Record<string, unknown>;
+      try {
+        ({ data } = await ctx.fleet.vehicleDataLive(vin, ["location_data", "drive_state"]));
+      } catch (e) {
+        if (e instanceof FleetApiError && e.info.code === "missing_scope") {
+          throw new FleetApiError({ ...e.info, code: "missing_location_scope", message: "The token is missing the vehicle_location scope needed for location.",
+            hint: "Add the vehicle_location scope: re-run node scripts/auth-helper.mjs url (it is in the default scopes), sign in once, then reload the MCP server. To hide location instead, set TESLA_FLEET_ENABLE_LOCATION=0." });
+        }
+        throw e;
+      }
       const d = (data.drive_state ?? {}) as Record<string, unknown>;
       return {
         ok: true,

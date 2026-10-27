@@ -19,7 +19,7 @@ Read tools need no confirm and never wake the car.
 
 - Tire pressures come in bar; the tool adds psi. Mention soft/hard warnings if present.
 - Closure codes: `0` = closed; anything else = open.
-- `get_location` (only if enabled): coarse by default; the car shows a location-sharing indicator on each read; nothing is stored.
+- `get_location` (on by default unless the operator opted out): live read, car must be online; coarse (~1 km) by default, `precision=precise` (~1 m + heading) only when the user asks for an exact spot; the car shows a location-sharing indicator on each read; nothing is stored. `missing_location_scope`: operator re-runs the auth helper (default scopes include `vehicle_location`).
 - No VIN given: the tool uses `TESLA_DEFAULT_VIN` or the only car; with several cars, ask which one (last 4 of VIN or name).
 - "How much have I used / what will it cost?": call `get_api_usage` (no network, not billed). Say it is a **local estimate** of this server's calls only (not Home Assistant or other apps), give this month's billable counts and the after-discount estimate, mention the `other` bucket is not priced, and point to the developer portal billing page as the real number.
 

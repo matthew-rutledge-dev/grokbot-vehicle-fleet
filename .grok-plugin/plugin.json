@@ -1,6 +1,6 @@
 {
   "name": "grokbot-vehicle-fleet",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge",
@@ -72,6 +72,11 @@
         "title": "Command proxy CA cert path",
         "description": "Optional. Path to the PEM your proxy's TLS certificate chains to (or the self-signed cert). TLS verification is never disabled."
       },
+      "TESLA_FLEET_PROXY_CA_FILE": {
+        "type": "string",
+        "title": "Command proxy CA file (alias)",
+        "description": "Optional alias for TESLA_COMMAND_PROXY_CA_CERT, for env loaders that already export this name. Used only when TESLA_COMMAND_PROXY_CA_CERT is unset."
+      },
       "TESLA_TOKEN_STORE": {
         "type": "string",
         "title": "Token store path",
@@ -85,7 +90,12 @@
       "TESLA_FLEET_ENABLE_LOCATION": {
         "type": "string",
         "title": "Enable location",
-        "description": "Optional opt-in. 1/true/yes/on lists get_location (coarse by default). Anything else = no location tool."
+        "description": "Optional opt-out. Location is on by default (coarse). 0/false/no/off hides get_location; an unrecognised value also turns it off (with a warning)."
+      },
+      "TESLA_FLEET_DEFAULT_LOCATION_PRECISION": {
+        "type": "string",
+        "title": "Default location precision",
+        "description": "Optional: coarse (default, ~1 km) or precise (~1 m plus heading) when get_location is called without precision."
       },
       "TESLA_DEFAULT_VIN": {
         "type": "string",

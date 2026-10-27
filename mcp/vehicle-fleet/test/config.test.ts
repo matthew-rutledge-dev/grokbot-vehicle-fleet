@@ -32,10 +32,10 @@ test("region maps to documented base URL; explicit base URL wins", () => {
   assert.ok(e.problems.some((p) => p.includes("TESLA_FLEET_REGION")));
 });
 
-test("defaults: read-only, location off, missing client id reported", () => {
+test("defaults: read-only, location on (coarse), missing client id reported", () => {
   const c = loadConfig({});
   assert.equal(c.readOnly.readOnly, true);
-  assert.equal(c.locationEnabled, false);
+  assert.equal(c.locationEnabled, true);
   assert.ok(c.problems.includes("TESLA_CLIENT_ID (or TESLA_FLEET_CLIENT_ID) is not set"));
 });
 
@@ -100,4 +100,30 @@ test("TESLA_FLEET_DRY_RUN fails closed: unknown values turn dry-run on with a wa
     assert.ok(!c.warnings.join(" ").includes(v), "value not echoed");
   }
   assert.equal(loadConfig({}).dryRun, false);
+});
+
+test("TESLA_FLEET_ENABLE_LOCATION: default on; off values off; unrecognised = off with a warning", () => {
+  assert.equal(loadConfig({}).locationEnabled, true);
+  assert.equal(loadConfig({}).locationPrecision, "coarse");
+  for (const v of ["", "${TESLA_FLEET_ENABLE_LOCATION}", "1", "true", "on", "YES"]) assert.equal(loadConfig({ TESLA_FLEET_ENABLE_LOCATION: v }).locationEnabled, true, v);
+  for (const v of ["0", "false", "no", "OFF"]) {
+    const c = loadConfig({ TESLA_FLEET_ENABLE_LOCATION: v });
+    assert.equal(c.locationEnabled, false, v);
+    assert.ok(!c.warnings.some((w) => w.includes("TESLA_FLEET_ENABLE_LOCATION")));
+  }
+  const bad = loadConfig({ TESLA_FLEET_ENABLE_LOCATION: "disabled" });
+  assert.equal(bad.locationEnabled, false);
+  assert.equal(bad.warnings.filter((w) => w.includes("TESLA_FLEET_ENABLE_LOCATION")).length, 1);
+  assert.equal(loadConfig({ TESLA_FLEET_DEFAULT_LOCATION_PRECISION: "precise" }).locationPrecision, "precise");
+  const p = loadConfig({ TESLA_FLEET_DEFAULT_LOCATION_PRECISION: "exact" });
+  assert.equal(p.locationPrecision, "coarse");
+  assert.equal(p.warnings.length, 1);
+});
+
+test("TESLA_FLEET_PROXY_CA_FILE is an alias for TESLA_COMMAND_PROXY_CA_CERT; the primary name wins", () => {
+  assert.equal(loadConfig({ TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/alias-ca.pem");
+  assert.equal(loadConfig({ TESLA_COMMAND_PROXY_CA_CERT: "/path/to/primary-ca.pem", TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/primary-ca.pem");
+  assert.equal(loadConfig({ TESLA_COMMAND_PROXY_CA_CERT: "${TESLA_COMMAND_PROXY_CA_CERT}", TESLA_FLEET_PROXY_CA_FILE: "/path/to/alias-ca.pem" }).proxyCaCertPath, "/path/to/alias-ca.pem", "unexpanded primary placeholder falls back to the alias");
+  assert.equal(loadConfig({}).proxyCaCertPath, undefined);
+  assert.equal(configPresence({ TESLA_FLEET_PROXY_CA_FILE: "/x.pem" }).TESLA_FLEET_PROXY_CA_FILE, "set");
 });

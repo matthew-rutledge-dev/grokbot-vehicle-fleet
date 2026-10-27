@@ -10,7 +10,7 @@ It is **read-only by default**, reads **cached data first**, and **never wakes t
 
 | Piece | Role |
 |---|---|
-| `vehicle-fleet` MCP (one server) | Read tools: battery/charge, climate, doors/locks/trunks/windows, tires (TPMS), connectivity state, key pairing status, multi-section snapshot, optional coarse location. Command tools (hidden unless read-only is explicitly off; each needs `confirm=true`): wake, lock/unlock, trunk/frunk, climate start/stop, set temps, charge start/stop, charge limit, send a destination. |
+| `vehicle-fleet` MCP (one server) | Read tools: battery/charge, climate, doors/locks/trunks/windows, tires (TPMS), connectivity state, key pairing status, multi-section snapshot, location (on by default, coarse; opt out). Command tools (hidden unless read-only is explicitly off; each needs `confirm=true`): wake, lock/unlock, trunk/frunk, climate start/stop, set temps, charge start/stop, charge limit, send a destination. |
 | Skills | `vehicle-fleet-boundary` (rules), `vehicle-fleet-status`, `vehicle-fleet-commands`, `vehicle-fleet-setup` (operator-driven), `vehicle-fleet-troubleshoot` |
 | `scripts/auth-helper.mjs` | Optional, operator-run helper that gets your first refresh token (OAuth code exchange) and writes the token store. Never run by the server or an agent. |
 
@@ -54,7 +54,7 @@ Then set the plugin variables below and reload MCP servers. Hosts start `node <p
 3. A refresh token from your own consent (`scripts/auth-helper.mjs`, see skill `vehicle-fleet-setup`).
 4. Only for commands: your own `tesla-http-proxy` (from Tesla's `vehicle-command` project), and your virtual key paired with the vehicle via `https://www.tesla.com/_ak/<your-domain>`.
 
-Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; add `energy_device_data` only for energy-site reads (`node scripts/auth-helper.mjs url --energy`, or `TESLA_AUTH_ENERGY=1`), `vehicle_location` only for location, `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
+Use the smallest scopes: read-only `openid offline_access vehicle_device_data vehicle_location` (the auth helper's default; `url --no-location` or `TESLA_AUTH_LOCATION=0` drops `vehicle_location` if you opt out of location); add `energy_device_data` only for energy-site reads (`node scripts/auth-helper.mjs url --energy`, or `TESLA_AUTH_ENERGY=1`), `vehicle_cmds` / `vehicle_charging_cmds` only for commands.
 
 ## Plugin variables
 
@@ -66,10 +66,11 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_REGION` | no | `na` / `eu` / `cn`; default auto-detect via `/api/1/users/region` |
 | `TESLA_FLEET_BASE_URL` | no | https override for the Fleet API base URL |
 | `TESLA_COMMAND_PROXY_URL` | for commands | Your proxy, e.g. `https://proxy.example.com:4443`. Alias: `TESLA_FLEET_PROXY_URL` |
-| `TESLA_COMMAND_PROXY_CA_CERT` | for a private CA / self-signed proxy cert | Path to the PEM to trust for the proxy only. TLS verification is never disabled. |
+| `TESLA_COMMAND_PROXY_CA_CERT` | for a private CA / self-signed proxy cert | Path to the PEM to trust for the proxy only. TLS verification is never disabled. Alias: `TESLA_FLEET_PROXY_CA_FILE` |
 | `TESLA_TOKEN_STORE` | no | Token store path (default below) |
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
-| `TESLA_FLEET_ENABLE_LOCATION` | no | `1`/`true`/`yes`/`on` lists `get_location` |
+| `TESLA_FLEET_ENABLE_LOCATION` | no | Location is **on by default**. `0`/`false`/`no`/`off` hides and refuses `get_location`. Any other value = **off**, one warning on stderr (see below) |
+| `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` | no | `coarse` (default) or `precise`: `get_location` precision when the call does not pass one |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
 | `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads and commands (e.g. `1234567890`); otherwise the only site on the account |
 | `TESLA_FLEET_DRY_RUN` | no | `1`/`true`/`yes`/`on`: confirmed commands are validated and return the exact request; **nothing is sent**. Unset or `0`/`false`/`no`/`off` = off; **any other value = on** (fails closed, one warning on stderr) |
@@ -85,7 +86,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data`; 
 | `TESLA_FLEET_RATE_WAKES_PER_USD` | no | Usage estimate only: wakes per USD (default `50`) |
 | `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
 
-**Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET` or `TESLA_FLEET_PROXY_URL`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
+**Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
 **PowerShell env loaders.** If you load these variables with a PowerShell script (dot-sourced in the shell that launches the MCP server or the auth helper), run it under PowerShell 7 (`pwsh`). Some loaders hang or fail under Windows PowerShell 5.1.
 
@@ -102,13 +103,23 @@ Unset variables that a host passes through literally (`${VAR}`) and empty values
 
 In read-only mode command tools are absent from `tools/list` and refused if called anyway; nothing is sent. Changing the flag needs an MCP reload.
 
+### Location (on by default, opt-out)
+
+The server runs for one owner and their own car, so `get_location` is listed by default. It is a live read (car must already be online; never wakes it), needs the `vehicle_location` scope (a token without it gets `missing_location_scope` with the fix), and the car shows a location-sharing indicator on each read. Nothing is stored.
+
+- **Precision:** `coarse` (default) rounds to 2 decimals (~1 km) and omits heading; `precise` rounds to 5 decimals (~1 m) and includes heading. Pass `precision=precise` per call, or set `TESLA_FLEET_DEFAULT_LOCATION_PRECISION=precise`.
+- **Opt out:** `TESLA_FLEET_ENABLE_LOCATION=0` (or `false`/`no`/`off`).
+- **Scope:** the auth helper's default token now includes `vehicle_location`. Turning location off on the server hides the tool but does **not** remove the scope from an existing token; to drop it, re-run `node scripts/auth-helper.mjs url --no-location` (or `TESLA_AUTH_LOCATION=0`) and sign in once.
+- An invalid `precision` argument is refused before any network call.
+- **Unrecognised value** (e.g. `disabled`): location is **off** with a warning. Setting the variable at all signals an intent to change the default, most likely an opt-out; guessing "on" would expose location against that intent, while guessing "off" only hides one read.
+
 ## Tools
 
-Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (only with `TESLA_FLEET_ENABLE_LOCATION`; coarse ~1 km unless `precision=precise`).
+Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (on by default; coarse unless `precision=precise`).
 
 Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
 
-Tool counts: **15** in the default read-only mode (11 vehicle + 4 energy reads), **41** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands), plus `get_location` when location is enabled.
+Tool counts: **16** in the default read-only mode (12 vehicle reads including `get_location` + 4 energy reads), **42** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands); one fewer each with location turned off.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -124,7 +135,7 @@ Vehicle commands (hidden unless read-only is explicitly off; signed by your prox
 | Charging | `charge_start`, `charge_stop`, `set_charge_limit` (50-100), `set_charging_amps` (1-48; the car caps it), `charge_port_door_open`, `charge_port_door_close` |
 | Navigation | `share_navigation` |
 
-Energy-site commands (same gates; sent directly to the Fleet API, scope `energy_cmds`): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`).
+Energy-site commands (same gates; sent unsigned, directly to the Fleet API, scope `energy_cmds`; no command proxy needed, verified live): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`). A successful call returns an empty `result` (`{}`); an empty (0-byte or whitespace-only) body, `{response: {}}`, `{code: 201, message: "Updated"}` (shown in some docs) and other plain result objects are also success. Every result carries `rawShape` (`empty`, `object`, `response-wrapped`, `null`, `string`, `array` or `other`; shape only, never values) so you can see what Tesla returned. An `error` key, `result: false` (the `reason` is surfaced) or a code of 400+ is reported as `rejected` (`sent: true`); a non-object body is `state_unknown`. Neither is retried. Read the new value back with `get_energy_site_info`.
 
 **`climate_warm_up`** makes "turn on the heat" work with no arguments: climate on, then both setpoints to `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`. If the car's cached outside temperature is below the cold threshold it also turns on the default seat heater(s) and (optionally) the steering wheel heater, and below the defrost threshold it turns on max defrost. Override per call with `temp`/`unit`, `seat_heat` (`auto`, `off`, 0-3), `seats` and `defrost` (`auto`, `true`, `false`). Steps run in order and stop at the first failure, reporting `completedSteps`, `failedStep` and `sent: "partial"` when some steps already ran (`failedStepSent` says whether the failed step itself was sent, not sent or unknown). The default 21 °C shows as 70 °F on a car set to Fahrenheit.
 
@@ -182,7 +193,7 @@ No other endpoints, no telemetry, no analytics.
 ## Privacy
 
 - The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only files it writes are the token store and the usage counter (`usage.json`, totals only).
-- Location is off unless you opt in, coarse by default, never written to disk. The vehicle shows a location-sharing indicator when location is read.
+- Location is on by default (opt out with `TESLA_FLEET_ENABLE_LOCATION=0`), coarse unless precise is asked for, never written to disk. The vehicle shows a location-sharing indicator when location is read.
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.

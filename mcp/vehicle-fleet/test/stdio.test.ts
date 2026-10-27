@@ -82,12 +82,12 @@ test("initialize + default (placeholders) = read-only: no command tools", async 
   try {
     assert.equal(c.getServerVersion()?.name, "vehicle-fleet");
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(names, [...READ_TOOLS].sort());
+    assert.deepEqual(names, [...READ_TOOLS, "get_location"].sort());
     const res = await c.callTool({ name: "door_lock", arguments: { confirm: true, user_request: "lock" } });
     assert.equal(text(res).readOnly, true);
     const b = text(await c.callTool({ name: "describe_boundary", arguments: {} }));
     assert.match(String(b.readOnlyStatus), /unexpanded placeholder/);
-    assert.equal(names.length, 15);
+    assert.equal(names.length, 16);
     const u = text(await c.callTool({ name: "get_api_usage", arguments: {} }));
     assert.equal(u.ok, true);
     assert.equal(u.localEstimate, true);
@@ -104,8 +104,8 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   const c = await connect({ ...live(), TESLA_FLEET_READ_ONLY: "false" });
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
-    assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS].sort());
-    assert.equal(names.length, 41);
+    assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, "get_location"].sort());
+    assert.equal(names.length, 42);
     assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));

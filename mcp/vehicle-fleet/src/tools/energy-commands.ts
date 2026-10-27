@@ -1,6 +1,6 @@
 /**
  * Energy-site setting commands (Powerwall). Sent directly to the Fleet API
- * (POST /api/1/energy_sites/{id}/...); they are not signed by the vehicle proxy.
+ * (POST /api/1/energy_sites/{id}/...), unsigned; no command proxy is needed (verified live).
  * Same gates as vehicle commands: hidden and refused unless read-only is explicitly
  * off, confirm=true + user_request, TESLA_FLEET_DRY_RUN honoured, no retries.
  * Scope: energy_cmds.
@@ -72,6 +72,52 @@ const SPECS: EnergySpec[] = [
   },
 ];
 
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/**
+ * Success = an empty body, or an object result: {} (what live calls return), {response: {}},
+ * {code: 2xx, message} (docs), or
+ * another plain result object, optionally inside the {response: ...} envelope. Failure =
+ * an `error` key, result === false (with reason), a code >= 400, or a non-object body.
+ * The request reached Tesla in every case, so sent is true (rejected) or "unknown".
+ */
+export type RawShape = "empty" | "object" | "response-wrapped" | "null" | "string" | "array" | "other";
+
+/** Debug-safe description of the response body: its shape only, never values. */
+export function rawShapeOf(raw: unknown): RawShape {
+  if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) return "empty";
+  if (raw === null) return "null";
+  if (typeof raw === "string") return "string";
+  if (Array.isArray(raw)) return "array";
+  if (isObj(raw)) return "response" in raw ? "response-wrapped" : "object";
+  return "other";
+}
+
+export function interpretEnergyResponse(raw: unknown):
+  | { ok: true; result: Record<string, unknown> }
+  | { ok: false; failure: Record<string, unknown> } {
+  // An empty (0-byte or whitespace-only) 2xx body counts as success, like {} (0.3.0 behaviour).
+  if (rawShapeOf(raw) === "empty") return { ok: true, result: {} };
+  if (!isObj(raw)) {
+    return { ok: false, failure: { sent: "unknown", code: "state_unknown", message: `Unexpected ${raw === null ? "null" : typeof raw} response body; the change may or may not have applied.` } };
+  }
+  if ("error" in raw) {
+    const err = raw.error, desc = raw.error_description;
+    return { ok: false, failure: { sent: true, code: "rejected", reason: typeof err === "string" ? err : "error", message: typeof desc === "string" ? desc : "Tesla returned an error; the change was not applied." } };
+  }
+  const r = "response" in raw ? raw.response : raw;
+  if (!isObj(r)) {
+    return { ok: false, failure: { sent: "unknown", code: "state_unknown", message: "Unexpected response shape; the change may or may not have applied." } };
+  }
+  if (r.result === false) {
+    return { ok: false, failure: { sent: true, code: "rejected", reason: typeof r.reason === "string" ? r.reason : "", message: `Rejected by the site: ${typeof r.reason === "string" && r.reason ? r.reason : "no reason given"}` } };
+  }
+  if (typeof r.code === "number" && r.code >= 400) {
+    return { ok: false, failure: { sent: true, code: "rejected", reason: String(r.code), message: typeof r.message === "string" ? r.message : "Rejected by the site" } };
+  }
+  return { ok: true, result: r };
+}
+
 /** Site id without a network call (dry-runs). */
 function offlineSite(args: ToolArgs, ctx: ToolContext): string | undefined {
   const raw = typeof args.energy_site_id === "string" && args.energy_site_id.trim() ? args.energy_site_id.trim() : ctx.config.defaultEnergySiteId;
@@ -116,12 +162,11 @@ function energyTool(spec: EnergySpec): ToolDef {
       }
       const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id);
       try {
-        const r = await ctx.fleet.energyCommand(siteId, spec.path, body);
-        const code = typeof r.code === "number" ? r.code : undefined;
-        if (code !== undefined && code >= 400) {
-          return { ok: false, sent: true, command: spec.name, code, message: typeof r.message === "string" ? r.message : "Rejected by the site" };
-        }
-        return { ok: true, sent: true, command: spec.name, result: { code, message: r.message }, readBackWith: "get_energy_site_info" };
+        const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
+        const outcome = interpretEnergyResponse(raw);
+        const rawShape = rawShapeOf(raw);
+        if (outcome.ok) return { ok: true, sent: true, command: spec.name, result: outcome.result, rawShape, readBackWith: "get_energy_site_info" };
+        return { ok: false, command: spec.name, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
       } catch (e) {
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });

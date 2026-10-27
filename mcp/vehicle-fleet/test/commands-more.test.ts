@@ -107,6 +107,8 @@ test("TESLA_FLEET_DRY_RUN: confirmed command returns the exact request, zero net
   assert.ok(!JSON.stringify(b).includes(VIN), "full VIN masked in dry-run output");
   const w = body(await c.callTool({ name: "wake_vehicle", arguments: intent }));
   assert.equal(w.dryRunMode, "TESLA_FLEET_DRY_RUN");
+  assert.ok(!JSON.stringify(w).includes(VIN), "wake dry-run masks the VIN");
+  assert.match(JSON.stringify(w.wouldSend), /\*\*\*MPLE\/wake_up/);
   const needsIntent = body(await c.callTool({ name: "flash_lights", arguments: { confirm: true } }));
   assert.equal(needsIntent.code, "user_request_required", "dry-run still needs user_request");
   const unlock = body(await c.callTool({ name: "door_unlock", arguments: intent }));

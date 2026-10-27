@@ -15,7 +15,7 @@ Read [reference.md](reference.md) for the full error table. Short version:
 | `vehicle_not_online` / `vehicle_unavailable` | asleep/offline/poor signal | cached read, later, or user-confirmed `wake_vehicle`; never loop |
 | `virtual_key_missing` | key not paired | pairing link in `hint` |
 | `proxy_not_configured` / `command_protocol_required` | no signing proxy | operator sets `TESLA_COMMAND_PROXY_URL` |
-| `proxy_unreachable` / `proxy_tls_error` | proxy down, wrong host, or cert/CA mismatch; **not sent** | operator checks the proxy and `TESLA_COMMAND_PROXY_CA_CERT` |
+| `proxy_unreachable` / `proxy_tls_error` | proxy down, wrong host, or cert/CA mismatch; **not sent** | operator checks the proxy and `TESLA_COMMAND_PROXY_CA_CERT` (alias `TESLA_FLEET_PROXY_CA_FILE`) |
 | `missing_scope` / `missing_energy_cmds_scope` | token lacks a command scope | `hint` names the scope and flag (`--commands`, `--energy-commands`); operator re-consents |
 | `rate_limited` / `rate_limited_locally` | too many calls | wait `retryAfterSec` |
 | `state_unknown` | command may have run (timeout, 408, 5xx, reset mid-request) | read back state; do not resend |
