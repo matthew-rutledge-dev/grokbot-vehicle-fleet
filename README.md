@@ -230,7 +230,7 @@ Event triggers (charge complete, plugged in or unplugged, door or trunk open whi
 - receives Fleet Telemetry records from Tesla's own `fleet-telemetry` server (which you host behind a public mTLS endpoint) and polls energy-site `live_status` read-only;
 - wakes an agent with a short prompt carrying a masked VIN or site id;
 - never sends vehicle commands, never wakes a car and never polls `vehicle_data`;
-- needs only an **access token** (no refresh token) for energy reads, because this plugin owns OAuth refresh and refresh tokens are single-use.
+- needs only an **access token** (no refresh token) for energy reads, because this plugin owns OAuth refresh and refresh tokens are single-use. See [Access-token export (opt-in)](#access-token-export-opt-in) for how this plugin can share one, and why a separate read-only sign-in is usually the better choice.
 
 When an alert needs an action, the agent comes back through this plugin's confirm-gated tools. Pushing a `fleet_telemetry_config` to a car is a one-time vehicle configuration change made by the operator (it is signed, like commands); this plugin does not do it. Without the bridge, the plugin works exactly as described here.
 
