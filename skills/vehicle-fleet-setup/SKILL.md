@@ -67,6 +67,7 @@ Use the official Docker image `tesla/vehicle-command`, pinned to a release tag (
 
 ```bash
 docker run -d --name tesla-http-proxy --restart unless-stopped \
+  --user "$(id -u):$(id -g)" \
   --security-opt=no-new-privileges:true \
   -v "$PWD/config:/config:ro" \
   -p 127.0.0.1:4443:4443 \
@@ -74,6 +75,8 @@ docker run -d --name tesla-http-proxy --restart unless-stopped \
   -tls-key /config/tls-key.pem -cert /config/tls-cert.pem -key-file /config/fleet-key.pem \
   -host 0.0.0.0 -port 4443
 ```
+
+**File ownership:** the image runs as a distroless non-root user, so run it as the uid:gid that owns `./config` (as above); otherwise it cannot read the `chmod 600` key files.
 
 `-host 0.0.0.0` is inside the container; the `-p 127.0.0.1:4443:4443` publish is what limits who can reach it. For a LAN-only host, publish on that LAN address instead and firewall it to the MCP machine.
 
@@ -83,6 +86,7 @@ Compose equivalent (the official `docker-compose.yml` uses these environment var
 services:
   tesla_http_proxy:
     image: tesla/vehicle-command:0.4.1
+    user: "1000:1000"   # the uid:gid that owns ./config (see `id -u` / `id -g`)
     restart: unless-stopped
     ports:
       - "127.0.0.1:4443:4443"
@@ -118,10 +122,10 @@ If the first command fails with a certificate error, fix the SAN or the CA file 
 - `TESLA_COMMAND_PROXY_URL=https://proxy.example.com:4443` (alias `TESLA_FLEET_PROXY_URL`)
 - `TESLA_COMMAND_PROXY_CA_CERT=/path/to/config/ca-cert.pem` (alias `TESLA_FLEET_PROXY_CA_FILE`): the CA (or the self-signed cert) to trust for the proxy only.
 
-### 3e. First test, in order
+### 3e. First test, in order (after pairing the key in step 4)
 
-1. `TESLA_FLEET_READ_ONLY=false` and `TESLA_FLEET_DRY_RUN=1`, reload, and ask for e.g. `flash_lights` with confirm: the result shows `wouldSend` and nothing is sent.
-2. `get_fleet_status`: the virtual key must show as paired (step 4); `describe_boundary` should show `proxyConfigured: true`.
+1. `TESLA_FLEET_READ_ONLY=false` and `TESLA_FLEET_DRY_RUN=1`, reload, and ask for e.g. `flash_lights` with confirm: the result shows `wouldSend` and nothing is sent. `describe_boundary` should show `proxyConfigured: true`.
+2. After step 4: `get_fleet_status` must show the virtual key as paired.
 3. Unset `TESLA_FLEET_DRY_RUN`, reload, car awake on its own, then one harmless live command with the user's yes: `flash_lights`. Errors: `proxy_unreachable` (not running / wrong host), `proxy_tls_error` (CA or SAN), `virtual_key_missing` (pair first).
 
 ## 4. Pair the virtual key

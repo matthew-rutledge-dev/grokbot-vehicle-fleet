@@ -8,7 +8,7 @@
  * (never auto-wake) -> virtual key paired (fleet_status, cached) -> POST via
  * proxy -> map result. No automatic retry; timeouts return "state unknown".
  */
-import { BENIGN_COMMAND_REASONS, FleetApiError, LocalRefusal, normalizeCommandReason } from "../errors.js";
+import { FleetApiError, LocalRefusal, noopMessage, normalizeCommandReason, REJECTION_REASON_TEXT } from "../errors.js";
 import { COMMAND_REQUEST_ERRORS } from "../http.js";
 import { maskVin } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
@@ -260,10 +260,15 @@ const NOT_SENT_NET = new Set(["ECONNREFUSED", "ENOTFOUND", "EAI_AGAIN", "EHOSTUN
 const TLS_CODES = /CERT|SELF_SIGNED|UNABLE_TO_VERIFY|ALTNAME|ERR_TLS/;
 
 /** Connection-level failure before any request reached the target: definitely not sent. */
-export function connectFailure(e: unknown): { code: string; message: string } | undefined {
+export function connectFailure(e: unknown, target: "proxy" | "fleet" = "proxy"): { code: string; message: string } | undefined {
   const cause = (e as { cause?: { code?: string } })?.cause;
   const code = cause?.code ?? (e as { code?: string })?.code;
   if (!code) return undefined;
+  if (target === "fleet") {
+    if (NOT_SENT_NET.has(code)) return { code: "fleet_api_unreachable", message: `Could not connect to the Fleet API (${code}); nothing was sent.` };
+    if (TLS_CODES.test(code)) return { code: "fleet_api_tls_error", message: `TLS check failed for the Fleet API (${code}); nothing was sent. Check the system clock, TESLA_FLEET_BASE_URL, and any TLS-intercepting proxy.` };
+    return undefined;
+  }
   if (NOT_SENT_NET.has(code)) return { code: "proxy_unreachable", message: `Could not connect to the command proxy (${code}); nothing was sent.` };
   if (TLS_CODES.test(code)) return { code: "proxy_tls_error", message: `TLS check failed for the command proxy (${code}); nothing was sent. Check TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) and the certificate's host name.` };
   return undefined;
@@ -274,7 +279,7 @@ export function connectFailure(e: unknown): { code: string; message: string } | 
  * unknown: the request may have reached the vehicle (timeout, 408, 5xx, reset mid-request,
  * or any other network error after connect). undefined: rethrow (local refusals, 4xx).
  */
-export function classifySendFailure(e: unknown):
+export function classifySendFailure(e: unknown, target: "proxy" | "fleet" = "proxy"):
   | { kind: "not_sent"; code: string; message: string }
   | { kind: "unknown"; detail: string }
   | undefined {
@@ -286,7 +291,7 @@ export function classifySendFailure(e: unknown):
     if (st === 408 || st >= 500) return { kind: "unknown", detail: `HTTP ${st}` };
     return undefined;
   }
-  const cf = connectFailure(e);
+  const cf = connectFailure(e, target);
   if (cf) return { kind: "not_sent", ...cf };
   const cause = (e as { cause?: { code?: string } })?.cause;
   const code = cause?.code ?? (e as { code?: string })?.code;
@@ -416,8 +421,10 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
       const reason = normalizeCommandReason(rawReason);
       const raw = rawReason ? { rawReason } : {};
       if (r.result === true) { done.push({ endpoint: s.endpoint, ok: true }); continue; }
-      if (Object.hasOwn(BENIGN_COMMAND_REASONS, reason)) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, ...raw, message: BENIGN_COMMAND_REASONS[reason] }); continue; }
-      const fail = { ok: false, sent: true as boolean | "partial", command: o.name, vinLast4: vin.slice(-4), reason, ...raw, message: `Vehicle rejected the command: ${reason || "no reason given"}` };
+      const noop = noopMessage(s.endpoint, reason);
+      if (noop) { done.push({ endpoint: s.endpoint, ok: true, noChange: true, reason, ...raw, message: noop }); continue; }
+      const friendly = Object.hasOwn(REJECTION_REASON_TEXT, reason) ? ` (${REJECTION_REASON_TEXT[reason]})` : "";
+      const fail = { ok: false, sent: true as boolean | "partial", command: o.name, vinLast4: vin.slice(-4), reason, ...raw, message: `Vehicle rejected the command: ${reason || "no reason given"}${friendly}` };
       return multi ? { ...fail, ...(done.length ? { sent: "partial", failedStepSent: true } : {}), failedStep: s.endpoint, completedSteps: done } : fail;
     } catch (e) {
       const partial = multi ? { failedStep: s.endpoint, completedSteps: done } : {};

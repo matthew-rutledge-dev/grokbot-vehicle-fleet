@@ -122,18 +122,41 @@ export function mapFleetError(
  * lower-case so "already_set" matches in both forms.
  */
 export const PROXY_REASON_PREFIX = /^\s*car could not execute command:\s*/i;
+// The proxy also reports security-controller failures as "vcsec could not execute command: ...".
+// That prefix is deliberately NOT stripped: such reasons never match a no-op entry and stay
+// rejections (fails safe).
 export function normalizeCommandReason(reason: unknown): string {
   if (typeof reason !== "string") return "";
   return reason.replace(PROXY_REASON_PREFIX, "").trim().toLowerCase();
 }
 
-export const BENIGN_COMMAND_REASONS: Record<string, string> = {
-  already_set: "Already at the requested value.",
-  is_charging: "Already charging.",
-  complete: "Charging is already complete.",
-  not_charging: "The vehicle was not charging.",
+/**
+ * No-op reasons, scoped to the command endpoint that can return them. A reason that is not on
+ * its own command's list is a rejection (e.g. charge_start + "disconnected" is a failure).
+ */
+export const NOOP_REASONS_BY_COMMAND: Record<string, Record<string, string>> = {
+  set_charge_limit: { already_set: "Already at the requested value." },
+  set_charging_amps: { already_set: "Already at the requested value." },
+  charge_start: {
+    is_charging: "Already charging.",
+    complete: "Charging is already complete.",
+    requested: "A start-charge request is already pending.",
+  },
+  charge_stop: { not_charging: "The vehicle was not charging." },
+  // Not exposed as tools; kept so the mapping matches the documented reasons.
+  charge_standard: { already_started: "Already started." },
+  charge_max_range: { already_started: "Already started." },
+  charge_port_door_close: { "already closed": "The charge port door is already closed." },
+};
+
+/** Friendly text for known rejection reasons (still failures). */
+export const REJECTION_REASON_TEXT: Record<string, string> = {
   disconnected: "No charger is connected.",
   no_power: "The connected charger is not providing power.",
-  requested: "A start-charge request is already pending.",
-  already_started: "Already started.",
 };
+
+/** No-op message for this command + normalised reason, or undefined (= rejection). */
+export function noopMessage(endpoint: string, reason: string): string | undefined {
+  const m = NOOP_REASONS_BY_COMMAND[endpoint];
+  return m && Object.hasOwn(m, reason) ? m[reason] : undefined;
+}

@@ -171,11 +171,11 @@ function energyTool(spec: EnergySpec): ToolDef {
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });
         }
-        const f = classifySendFailure(e);
+        const f = classifySendFailure(e, "fleet");
         if (f?.kind === "unknown") {
           return { ok: false, sent: "unknown", command: spec.name, code: "state_unknown", cause: f.detail, message: `The change may or may not have applied (${f.detail}). It was not retried; do not resend blindly.`, hint: "Read it back with get_energy_site_info." };
         }
-        if (f?.kind === "not_sent") return { ok: false, sent: false, command: spec.name, code: "fleet_api_unreachable", error: f.message.replace("the command proxy", "the Fleet API").replace(" Check TESLA_COMMAND_PROXY_CA_CERT and the certificate's host name.", "") };
+        if (f?.kind === "not_sent") return { ok: false, sent: false, command: spec.name, code: f.code, error: f.message };
         throw e;
       }
     },

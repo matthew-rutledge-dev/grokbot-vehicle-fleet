@@ -303,40 +303,90 @@ test("proxy_not_configured hint names the variable and its alias", async () => {
   assert.match(String(b.hint), /TESLA_FLEET_PROXY_URL/);
 });
 
-test("no-op reasons: proxy-prefixed and bare forms are noChange; raw reason kept; unrelated stays rejected", async () => {
-  const cases: Array<[string, boolean, string]> = [
-    ["car could not execute command: already_set", true, "already_set"],
-    ["Car could not execute command:   already_set  ", true, "already_set"],
-    ["already_set", true, "already_set"],
-    ["car could not execute command: is_charging", true, "is_charging"],
-    ["car could not execute command: complete", true, "complete"],
-    ["car could not execute command: not_charging", true, "not_charging"],
-    ["car could not execute command: disconnected", true, "disconnected"],
-    ["requested", true, "requested"],
-    ["car could not execute command: user_present", false, "user_present"],
-    ["car could not execute command: already_set_but_not_really", false, "already_set_but_not_really"],
-    ["car could not execute command: constructor", false, "constructor"],
+const P = "car could not execute command: ";
+
+async function sendWithReason(tool: string, endpoint: string, args: Record<string, unknown>, raw: string) {
+  const { ctx } = setup(baseEnv(ON), {
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/${endpoint}`]: () => ({ status: 200, body: { response: { result: false, reason: raw } } }),
+  });
+  const c = await connect(ctx);
+  return body(await c.callTool({ name: tool, arguments: { ...args, ...intent } }));
+}
+
+test("scoped no-op reasons are accepted on their own command (proxy-prefixed and bare); raw kept", async () => {
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    ["set_charge_limit", "set_charge_limit", { percent: 80 }, "already_set"],
+    ["set_charging_amps", "set_charging_amps", { charging_amps: 16 }, "already_set"],
+    ["charge_start", "charge_start", {}, "is_charging"],
+    ["charge_start", "charge_start", {}, "complete"],
+    ["charge_start", "charge_start", {}, "requested"],
+    ["charge_stop", "charge_stop", {}, "not_charging"],
+    ["charge_port_door_close", "charge_port_door_close", {}, "already closed"],
   ];
-  for (const [raw, noop, norm] of cases) {
-    const { ctx } = setup(baseEnv(ON), {
-      [`POST ${PROXY}/api/1/vehicles/${VIN}/command/set_charge_limit`]: () => ({ status: 200, body: { response: { result: false, reason: raw } } }),
-    });
-    const c = await connect(ctx);
-    const b = body(await c.callTool({ name: "set_charge_limit", arguments: { percent: 80, ...intent } }));
-    assert.equal(b.ok, noop, raw);
-    assert.equal(b.reason, norm, raw);
-    assert.equal(b.rawReason, raw, `${raw}: raw reason kept`);
-    if (noop) assert.equal(b.noChange, true, raw);
-    else assert.match(String(b.message), /Vehicle rejected the command/, raw);
+  for (const [tool, endpoint, args, reason] of cases) {
+    for (const raw of [`${P}${reason}`, reason, `  Car Could Not Execute Command:  ${reason.toUpperCase()} `]) {
+      const b = await sendWithReason(tool, endpoint, args, raw);
+      assert.equal(b.ok, true, `${tool} ${raw}`);
+      assert.equal(b.noChange, true, `${tool} ${raw}`);
+      assert.equal(b.reason, reason);
+      assert.equal(b.rawReason, raw, "raw reason kept");
+    }
   }
 });
 
-test("no-op reason mid warm-up counts as done, not a failure", async () => {
-  const { ctx } = setup(baseEnv(ON), {
-    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/auto_conditioning_start`]: () => ({ status: 200, body: { response: { result: false, reason: "car could not execute command: already_set" } } }),
-    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/set_temps`]: () => ({ status: 200, body: { response: { result: true, reason: "" } } }),
+test("charge_start with disconnected / no_power is a rejection with friendly text (prefixed and bare)", async () => {
+  for (const [reason, text] of [["disconnected", /No charger is connected/], ["no_power", /not providing power/]] as const) {
+    for (const raw of [`${P}${reason}`, reason]) {
+      const b = await sendWithReason("charge_start", "charge_start", {}, raw);
+      assert.equal(b.ok, false, raw);
+      assert.equal(b.sent, true);
+      assert.equal(b.noChange, undefined);
+      assert.equal(b.reason, reason);
+      assert.equal(b.rawReason, raw);
+      assert.match(String(b.message), /Vehicle rejected the command/);
+      assert.match(String(b.message), text);
+    }
+  }
+});
+
+test("a valid no-op reason on the wrong command is a rejection", async () => {
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    ["charge_stop", "charge_stop", {}, "is_charging"],
+    ["charge_start", "charge_start", {}, "not_charging"],
+    ["charge_start", "charge_start", {}, "already_set"],
+    ["set_charge_limit", "set_charge_limit", { percent: 80 }, "complete"],
+    ["climate_start", "auto_conditioning_start", {}, "already_set"],
+    ["door_lock", "door_lock", {}, "already_started"],
+    ["charge_port_door_open", "charge_port_door_open", {}, "already closed"],
+  ];
+  for (const [tool, endpoint, args, reason] of cases) {
+    for (const raw of [`${P}${reason}`, reason]) {
+      const b = await sendWithReason(tool, endpoint, args, raw);
+      assert.equal(b.ok, false, `${tool} ${raw}`);
+      assert.match(String(b.message), /Vehicle rejected the command/);
+    }
+  }
+});
+
+test("unrelated, look-alike and vcsec-prefixed reasons stay rejected", async () => {
+  for (const raw of [`${P}user_present`, `${P}already_set_but_not_really`, `${P}constructor`, "vcsec could not execute command: already_set", "vcsec could not execute command: is_charging"]) {
+    const tool = raw.includes("is_charging") ? "charge_start" : "set_charge_limit";
+    const b = await sendWithReason(tool, tool, tool === "set_charge_limit" ? { percent: 80 } : {}, raw);
+    assert.equal(b.ok, false, raw);
+    assert.equal(b.rawReason, raw);
+  }
+});
+
+test("energy command TLS failure points at the Fleet API, not the proxy CA variable", async () => {
+  const SITE = "1234567890";
+  const { ctx } = setup(baseEnv({ TESLA_FLEET_READ_ONLY: "false", TESLA_DEFAULT_ENERGY_SITE_ID: SITE }), {
+    [`POST ${BASE}/api/1/energy_sites/${SITE}/storm_mode`]: () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" } }); },
   });
   const c = await connect(ctx);
-  const b = body(await c.callTool({ name: "climate_warm_up", arguments: { ...intent, seat_heat: "off", defrost: false } }));
-  assert.equal(b.ok, true);
+  const b = body(await c.callTool({ name: "set_storm_mode", arguments: { enabled: true, ...intent } }));
+  assert.equal(b.code, "fleet_api_tls_error");
+  assert.equal(b.sent, false);
+  const text = JSON.stringify(b);
+  assert.ok(!/PROXY_CA|command proxy|PROXY_CA_FILE/i.test(text), text);
+  assert.match(String(b.error), /Fleet API/);
 });

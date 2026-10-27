@@ -2,8 +2,10 @@
 
 ## 0.3.2 (unreleased)
 
-- Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased) for every known no-op reason; the original text is kept in `rawReason`.
-- Docs: full generic `tesla-http-proxy` walkthrough in the setup skill (pinned official image or release build, self-signed CA and SAN, loopback/LAN-only binding, health check, dry-run then fleet_status then flash_lights), and a README pointer noting the proxy has no client authentication.
+- Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased); the original text is kept in `rawReason`. The `vcsec could not execute command:` prefix is deliberately not stripped (stays a rejection).
+- No-op reasons are now scoped to their command: `already_set` (set_charge_limit, set_charging_amps), `is_charging` / `complete` / `requested` (charge_start), `not_charging` (charge_stop), `already_started` (charge_standard, charge_max_range), `already closed` (charge_port_door_close). Any other reason is a rejection. `disconnected` and `no_power` are no longer treated as no-ops: charge_start now reports them as rejections with friendly text.
+- Energy command TLS / connection failures name the Fleet API (`fleet_api_tls_error`, `fleet_api_unreachable`) and no longer point at the proxy CA variable.
+- Docs: full generic `tesla-http-proxy` walkthrough in the setup skill (pinned official image or release build, run as the uid:gid owning the key files, self-signed CA and SAN, loopback/LAN-only binding, health check, dry-run then fleet_status then flash_lights), and a README pointer noting the proxy has no client authentication.
 
 ## 0.3.1 (unreleased)
 

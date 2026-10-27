@@ -152,7 +152,7 @@ Vehicle commands additionally:
 - go **only** through your proxy (`/api/1/vehicles/{VIN}/command/...`, HTTPS with optional CA pin; never directly to the Fleet API) with your bearer token;
 - are refused if no proxy is configured, if the vehicle is not already online (no auto-wake), or if the virtual key is not paired (checked first via `fleet_status`, so you are not billed for a rejected command).
 
-Errors are explicit: `vehicle_not_online`, `virtual_key_missing` (with the pairing link), `proxy_not_configured`, `proxy_unreachable` / `proxy_tls_error` (not sent), `missing_scope` / `missing_energy_cmds_scope` (names the scope and the auth-helper flag to add), `state_unknown`, `invalid_arguments`.
+Errors are explicit: `vehicle_not_online`, `virtual_key_missing` (with the pairing link), `proxy_not_configured`, `proxy_unreachable` / `proxy_tls_error` (not sent; energy commands: `fleet_api_unreachable` / `fleet_api_tls_error`), `missing_scope` / `missing_energy_cmds_scope` (names the scope and the auth-helper flag to add), `state_unknown`, `invalid_arguments`. A no-op reason (e.g. `already_set` on `set_charge_limit`, with or without the proxy's `car could not execute command:` prefix) is `ok` with `noChange` only on the command that can return it; any other reason is a rejection (`rawReason` keeps the original text).
 
 Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` (and `energy_device_data`). The default stays read-only.
 
