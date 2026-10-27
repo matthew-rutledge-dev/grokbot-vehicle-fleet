@@ -221,6 +221,19 @@ No other endpoints, no telemetry, no analytics.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
 
+## Event triggers and telemetry alerts (separate bridge)
+
+This plugin is the **request and command path**: an agent asks, the plugin reads (cached first) or, when commands are on, sends one confirm-gated command. It does not watch the car, receive telemetry or push alerts.
+
+Event triggers (charge complete, plugged in or unplugged, door or trunk open while parked, Sentry alerts, low battery, software update available) and energy-site alerts (grid outage, battery near the backup reserve, storm watch) live in an event bridge with a Tesla source adapter. The bridge is a **separate, self-hosted project, not part of this repository**; you install and run it yourself, and this plugin neither ships nor starts it. That bridge:
+
+- receives Fleet Telemetry records from Tesla's own `fleet-telemetry` server (which you host behind a public mTLS endpoint) and polls energy-site `live_status` read-only;
+- wakes an agent with a short prompt carrying a masked VIN or site id;
+- never sends vehicle commands, never wakes a car and never polls `vehicle_data`;
+- needs only an **access token** (no refresh token) for energy reads, because this plugin owns OAuth refresh and refresh tokens are single-use.
+
+When an alert needs an action, the agent comes back through this plugin's confirm-gated tools. Pushing a `fleet_telemetry_config` to a car is a one-time vehicle configuration change made by the operator (it is signed, like commands); this plugin does not do it. Without the bridge, the plugin works exactly as described here.
+
 ## Roadmap
 
 - Planned: a Home Assistant custom integration (`custom_components/vehicle_fleet/`, installable via the HA Marketplace or HACS) in this repo, after v0.1. See `BACKLOG.md`.
