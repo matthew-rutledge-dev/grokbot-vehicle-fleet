@@ -100,9 +100,11 @@ test("location: env default precision, invalid precision refused, missing scope 
   {
     const { ctx, calls } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }));
     const c = await connect(ctx);
-    const res = await c.callTool({ name: "get_location", arguments: { precision: "exact" } });
-    assert.equal(body(res).code, "invalid_arguments");
-    assert.ok(!calls.some((x) => x.url.includes("/vehicle_data?")));
+    for (const precision of ["exact", 5, ""]) {
+      const res = await c.callTool({ name: "get_location", arguments: { precision } });
+      assert.equal(body(res).code, "invalid_arguments", String(precision));
+    }
+    assert.equal(calls.length, 0, "no token refresh, vehicle lookup or data call on invalid precision");
   }
   {
     const { ctx } = setup(baseEnv({ TESLA_DEFAULT_VIN: VIN }), {

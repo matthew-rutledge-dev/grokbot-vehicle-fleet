@@ -109,6 +109,8 @@ The server runs for one owner and their own car, so `get_location` is listed by 
 
 - **Precision:** `coarse` (default) rounds to 2 decimals (~1 km) and omits heading; `precise` rounds to 5 decimals (~1 m) and includes heading. Pass `precision=precise` per call, or set `TESLA_FLEET_DEFAULT_LOCATION_PRECISION=precise`.
 - **Opt out:** `TESLA_FLEET_ENABLE_LOCATION=0` (or `false`/`no`/`off`).
+- **Scope:** the auth helper's default token now includes `vehicle_location`. Turning location off on the server hides the tool but does **not** remove the scope from an existing token; to drop it, re-run `node scripts/auth-helper.mjs url --no-location` (or `TESLA_AUTH_LOCATION=0`) and sign in once.
+- An invalid `precision` argument is refused before any network call.
 - **Unrecognised value** (e.g. `disabled`): location is **off** with a warning. Setting the variable at all signals an intent to change the default, most likely an opt-out; guessing "on" would expose location against that intent, while guessing "off" only hides one read.
 
 ## Tools
@@ -133,7 +135,7 @@ Vehicle commands (hidden unless read-only is explicitly off; signed by your prox
 | Charging | `charge_start`, `charge_stop`, `set_charge_limit` (50-100), `set_charging_amps` (1-48; the car caps it), `charge_port_door_open`, `charge_port_door_close` |
 | Navigation | `share_navigation` |
 
-Energy-site commands (same gates; sent unsigned, directly to the Fleet API, scope `energy_cmds`; no command proxy needed, verified live): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`). A successful call returns an empty `result` (`{}`); some docs show `{code: 201, message: "Updated"}`, which is also treated as success. Read the new value back with `get_energy_site_info`.
+Energy-site commands (same gates; sent unsigned, directly to the Fleet API, scope `energy_cmds`; no command proxy needed, verified live): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`). A successful call returns an empty `result` (`{}`); `{code: 201, message: "Updated"}` (shown in some docs) and other plain result objects are also success. An `error` key, `result: false` (the `reason` is surfaced) or a code of 400+ is reported as `rejected` (`sent: true`); a non-object body is `state_unknown`. Neither is retried. Read the new value back with `get_energy_site_info`.
 
 **`climate_warm_up`** makes "turn on the heat" work with no arguments: climate on, then both setpoints to `TESLA_FLEET_DEFAULT_CLIMATE_TEMP_C`. If the car's cached outside temperature is below the cold threshold it also turns on the default seat heater(s) and (optionally) the steering wheel heater, and below the defrost threshold it turns on max defrost. Override per call with `temp`/`unit`, `seat_heat` (`auto`, `off`, 0-3), `seats` and `defrost` (`auto`, `true`, `false`). Steps run in order and stop at the first failure, reporting `completedSteps`, `failedStep` and `sent: "partial"` when some steps already ran (`failedStepSent` says whether the failed step itself was sent, not sent or unknown). The default 21 °C shows as 70 °F on a car set to Fahrenheit.
 

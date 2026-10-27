@@ -17,7 +17,7 @@ Never run silently. Never ask for secrets in chat; the operator sets plugin vari
 
 ## 2. First refresh token
 
-Pick the smallest scopes: read-only = `openid offline_access vehicle_device_data vehicle_location` (the default; `url --no-location` drops location); add `energy_device_data` only for Powerwall/solar reads (`url --energy` or `TESLA_AUTH_ENERGY=1`); Command scopes are opt-in: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` for Powerwall settings.
+Pick the smallest scopes: read-only = `openid offline_access vehicle_device_data vehicle_location` (the default token now includes `vehicle_location`; turning location off on the server with `TESLA_FLEET_ENABLE_LOCATION=0` does not remove the scope, so re-run `url --no-location` and sign in once to drop it); add `energy_device_data` only for Powerwall/solar reads (`url --energy` or `TESLA_AUTH_ENERGY=1`); Command scopes are opt-in: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` for Powerwall settings.
 
 ```bash
 export TESLA_CLIENT_ID=...        # in your terminal, not in chat

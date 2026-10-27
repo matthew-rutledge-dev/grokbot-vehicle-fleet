@@ -98,7 +98,7 @@ export const READ_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "describe_boundary",
-      description: "Shows what this server will and will not do: read-only state, location opt-in, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
+      description: "Shows what this server will and will not do: read-only state, location on/off (on by default) and default precision, dry-run mode, proxy configured, which plugin variables are set (never values), token store status, billable calls this session (get_api_usage has monthly totals), and the safety rules. No network call.",
       inputSchema: { type: "object", properties: {} },
     },
     handler: async (_args, ctx) => ({
@@ -222,13 +222,14 @@ export const READ_TOOLS: ToolDef[] = [
       },
     },
     handler: async (args, ctx) => {
+      // Validate before any network call (token refresh, vehicle list, state).
+      if (args.precision !== undefined && args.precision !== "coarse" && args.precision !== "precise") {
+        throw new LocalRefusal("invalid_arguments", "precision must be coarse or precise; nothing was read.");
+      }
       const vin = await ctx.fleet.resolveVin(args.vin);
       const v = await ctx.fleet.requireOnline(vin);
       if (v.granular_access?.hide_private) {
         return { ok: false, vinLast4: vin.slice(-4), code: "location_hidden", message: "This vehicle share hides location (hide_private)." };
-      }
-      if (args.precision !== undefined && args.precision !== "coarse" && args.precision !== "precise") {
-        throw new LocalRefusal("invalid_arguments", "precision must be coarse or precise; nothing was read.");
       }
       const precision = (args.precision as "coarse" | "precise" | undefined) ?? ctx.config.locationPrecision;
       let data: Record<string, unknown>;

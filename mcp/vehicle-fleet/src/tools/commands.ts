@@ -535,7 +535,8 @@ const WAKE: ToolDef = {
       const vin = offlineVin(args, ctx);
       return {
         dryRun: true, dryRunMode: "TESLA_FLEET_DRY_RUN", sent: false, command: "wake_vehicle",
-        wouldSend: [{ method: "POST", url: `<fleet base>/api/1/vehicles/${vin ?? "{vin}"}/wake_up`, body: {} }],
+        wouldSend: [{ method: "POST", url: `<fleet base>/api/1/vehicles/${vin ? maskVin(vin) : "{vin}"}/wake_up`, body: {} }],
+        vinLast4: vin ? vin.slice(-4) : "(resolved at send time)",
         note: "Validated only; no network call was made.",
       };
     }

@@ -134,3 +134,35 @@ test("energy commands: an empty {} response is success; no command proxy needed 
   assert.ok(sent.every((x) => x.url.startsWith(BASE) && x.dispatcher === undefined));
   assert.ok(!calls.some((x) => x.url.includes("proxy.example.com")));
 });
+
+test("energy commands: response bodies - success shapes vs error-shaped 200s", async () => {
+  const cases: Array<[string, unknown, { ok: boolean; sent?: unknown; code?: string; reason?: string }]> = [
+    ["{}", { response: {} }, { ok: true }],
+    ["bare {}", {}, { ok: true }],
+    ["code 201", { response: { code: 201, message: "Updated" } }, { ok: true }],
+    ["plain result", { response: { result: true } }, { ok: true }],
+    ["error key", { error: "invalid_field", error_description: "bad value" }, { ok: false, sent: true, code: "rejected", reason: "invalid_field" }],
+    ["result false", { response: { result: false, reason: "site_offline" } }, { ok: false, sent: true, code: "rejected", reason: "site_offline" }],
+    ["code 400 in body", { response: { code: 400, message: "nope" } }, { ok: false, sent: true, code: "rejected" }],
+    ["string body", "ok", { ok: false, sent: "unknown", code: "state_unknown" }],
+    ["null body", null, { ok: false, sent: "unknown", code: "state_unknown" }],
+    ["null response", { response: null }, { ok: false, sent: "unknown", code: "state_unknown" }],
+  ];
+  for (const [label, resBody, want] of cases) {
+    const { ctx, calls } = setup(baseEnv(ON), routesFor(["storm_mode"], () => ({ status: 200, body: resBody })));
+    const c = await connect(ctx);
+    const res = await c.callTool({ name: "set_storm_mode", arguments: { enabled: true, ...intent } });
+    const b = body(res);
+    assert.equal(b.ok, want.ok, label);
+    if (want.ok) {
+      assert.equal(b.sent, true, label);
+    } else {
+      assert.equal(b.sent, want.sent, label);
+      assert.equal(b.code, want.code, label);
+      if (want.reason !== undefined) assert.equal(b.reason, want.reason, label);
+      assert.doesNotMatch(String(b.hint), /try again|retry it|resend/i, label);
+      assert.match(String(b.hint), /get_energy_site_info/, label);
+    }
+    assert.equal(energyCalls(calls).length, 1, `${label}: not retried`);
+  }
+});
