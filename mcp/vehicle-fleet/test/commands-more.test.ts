@@ -302,3 +302,111 @@ test("proxy_not_configured hint names the variable and its alias", async () => {
   assert.match(String(b.hint), /TESLA_COMMAND_PROXY_URL/);
   assert.match(String(b.hint), /TESLA_FLEET_PROXY_URL/);
 });
+
+const P = "car could not execute command: ";
+
+async function sendWithReason(tool: string, endpoint: string, args: Record<string, unknown>, raw: string) {
+  const { ctx } = setup(baseEnv(ON), {
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/${endpoint}`]: () => ({ status: 200, body: { response: { result: false, reason: raw } } }),
+  });
+  const c = await connect(ctx);
+  return body(await c.callTool({ name: tool, arguments: { ...args, ...intent } }));
+}
+
+test("scoped no-op reasons are accepted on their own command (proxy-prefixed and bare); raw kept", async () => {
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    ["set_charge_limit", "set_charge_limit", { percent: 80 }, "already_set"],
+    ["set_charging_amps", "set_charging_amps", { charging_amps: 16 }, "already_set"],
+    ["charge_start", "charge_start", {}, "is_charging"],
+    ["charge_start", "charge_start", {}, "complete"],
+    ["charge_start", "charge_start", {}, "requested"],
+    ["charge_stop", "charge_stop", {}, "not_charging"],
+    ["charge_port_door_close", "charge_port_door_close", {}, "already closed"],
+  ];
+  for (const [tool, endpoint, args, reason] of cases) {
+    for (const raw of [`${P}${reason}`, reason, `  Car Could Not Execute Command:  ${reason.toUpperCase()} `]) {
+      const b = await sendWithReason(tool, endpoint, args, raw);
+      assert.equal(b.ok, true, `${tool} ${raw}`);
+      assert.equal(b.noChange, true, `${tool} ${raw}`);
+      assert.equal(b.reason, reason);
+      assert.equal(b.rawReason, raw, "raw reason kept");
+    }
+  }
+});
+
+test("charge_start with disconnected / no_power is a rejection with friendly text (prefixed and bare)", async () => {
+  for (const [reason, text] of [["disconnected", /No charger is connected/], ["no_power", /not providing power/]] as const) {
+    for (const raw of [`${P}${reason}`, reason]) {
+      const b = await sendWithReason("charge_start", "charge_start", {}, raw);
+      assert.equal(b.ok, false, raw);
+      assert.equal(b.sent, true);
+      assert.equal(b.noChange, undefined);
+      assert.equal(b.reason, reason);
+      assert.equal(b.rawReason, raw);
+      assert.match(String(b.message), /Vehicle rejected the command/);
+      assert.match(String(b.message), text);
+    }
+  }
+});
+
+test("a valid no-op reason on the wrong command is a rejection", async () => {
+  const cases: Array<[string, string, Record<string, unknown>, string]> = [
+    ["charge_stop", "charge_stop", {}, "is_charging"],
+    ["charge_start", "charge_start", {}, "not_charging"],
+    ["charge_start", "charge_start", {}, "already_set"],
+    ["set_charge_limit", "set_charge_limit", { percent: 80 }, "complete"],
+    ["climate_start", "auto_conditioning_start", {}, "already_set"],
+    ["door_lock", "door_lock", {}, "already_started"],
+    ["charge_port_door_open", "charge_port_door_open", {}, "already closed"],
+  ];
+  for (const [tool, endpoint, args, reason] of cases) {
+    for (const raw of [`${P}${reason}`, reason]) {
+      const b = await sendWithReason(tool, endpoint, args, raw);
+      assert.equal(b.ok, false, `${tool} ${raw}`);
+      assert.match(String(b.message), /Vehicle rejected the command/);
+    }
+  }
+});
+
+test("unrelated, look-alike and vcsec-prefixed reasons stay rejected", async () => {
+  for (const raw of [`${P}user_present`, `${P}already_set_but_not_really`, `${P}constructor`, "vcsec could not execute command: already_set", "vcsec could not execute command: is_charging"]) {
+    const tool = raw.includes("is_charging") ? "charge_start" : "set_charge_limit";
+    const b = await sendWithReason(tool, tool, tool === "set_charge_limit" ? { percent: 80 } : {}, raw);
+    assert.equal(b.ok, false, raw);
+    assert.equal(b.rawReason, raw);
+  }
+});
+
+test("energy command TLS failure points at the Fleet API, not the proxy CA variable", async () => {
+  const SITE = "1234567890";
+  const { ctx } = setup(baseEnv({ TESLA_FLEET_READ_ONLY: "false", TESLA_DEFAULT_ENERGY_SITE_ID: SITE }), {
+    [`POST ${BASE}/api/1/energy_sites/${SITE}/storm_mode`]: () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UNABLE_TO_VERIFY_LEAF_SIGNATURE" } }); },
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "set_storm_mode", arguments: { enabled: true, ...intent } }));
+  assert.equal(b.code, "fleet_api_tls_error");
+  assert.equal(b.sent, false);
+  const text = JSON.stringify(b);
+  assert.ok(!/PROXY_CA|command proxy|PROXY_CA_FILE/i.test(text), text);
+  assert.match(String(b.error), /Fleet API/);
+});
+
+test("climate_warm_up: a proxy-wrapped rejection after completed steps returns sent 'partial'", async () => {
+  const cold = fixtureData();
+  (cold.climate_state as Record<string, unknown>).outside_temp = 1; // cold, not defrost-cold
+  const { ctx, calls } = setup(baseEnv(ON), {
+    ...cmdRoutes(["auto_conditioning_start", "set_temps"]),
+    [`GET ${BASE}/api/1/vehicles/${VIN}/vehicle_data_cached`]: () => ({ status: 200, body: { response: cold } }),
+    [`POST ${PROXY}/api/1/vehicles/${VIN}/command/remote_seat_heater_request`]: () => ({ status: 200, body: { response: { result: false, reason: "car could not execute command: user_present" } } }),
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "climate_warm_up", arguments: intent }));
+  assert.equal(b.ok, false);
+  assert.equal(b.sent, "partial");
+  assert.equal(b.failedStepSent, true);
+  assert.equal(b.failedStep, "remote_seat_heater_request");
+  assert.equal(b.reason, "user_present");
+  assert.equal(b.rawReason, "car could not execute command: user_present");
+  assert.deepEqual((b.completedSteps as Array<{ endpoint: string }>).map((s) => s.endpoint), ["auto_conditioning_start", "set_temps"]);
+  assert.equal(cmdCalls(calls).length, 3, "stopped at the rejection; steering wheel step not sent");
+});
