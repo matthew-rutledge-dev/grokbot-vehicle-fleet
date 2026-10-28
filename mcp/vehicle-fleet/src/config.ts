@@ -2,6 +2,7 @@
  * One frozen Config built from env at start. Every value is installer config;
  * nothing is hardcoded except Tesla's documented public endpoints.
  */
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { resolveExportPath } from "./tokenexport.js";
@@ -50,6 +51,10 @@ export const ENV = {
   RATE_COMMANDS: "TESLA_FLEET_RATE_COMMANDS_PER_USD",
   RATE_WAKES: "TESLA_FLEET_RATE_WAKES_PER_USD",
   MONTHLY_DISCOUNT: "TESLA_FLEET_MONTHLY_DISCOUNT_USD",
+  COMMAND_KEY_FILE: "TESLA_FLEET_COMMAND_KEY_FILE",
+  VIDEO_HOST_ALLOWLIST: "TESLA_FLEET_VIDEO_HOST_ALLOWLIST",
+  AUDIT_LOG: "TESLA_FLEET_AUDIT_LOG",
+  AUDIT_FULL_VIN: "TESLA_FLEET_AUDIT_FULL_VIN",
 } as const;
 
 /** Defaults for the climate_warm_up preset (all overridable per call). */
@@ -94,6 +99,17 @@ function resolveNhtsa(env: Env, warnings: string[]): boolean {
   if (ON_VALUES.includes(l)) return false;
   if (OFF_VALUES.includes(l)) return true;
   warnings.push(`${ENV.DISABLE_NHTSA} has an unrecognised value; NHTSA recalls (get_recalls) are OFF. Use 1/true/on to disable or 0/false/off to keep them.`);
+  return false;
+}
+
+/** Full VIN in audit lines (for cars confirmed on the account): on by default; 0/false/no/off = last 6. Unrecognised = last 6 (masks). */
+function resolveAuditFullVin(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.AUDIT_FULL_VIN, env);
+  if (v === undefined) return true;
+  const l = v.toLowerCase();
+  if (ON_VALUES.includes(l)) return true;
+  if (OFF_VALUES.includes(l)) return false;
+  warnings.push(`${ENV.AUDIT_FULL_VIN} has an unrecognised value; audit lines keep the VIN's last 6. Use 1/true/on or 0/false/off.`);
   return false;
 }
 
@@ -171,6 +187,17 @@ export type Config = {
   keyDomain?: string;
   /** Rates for the local usage estimate (get_api_usage). */
   rates: Rates;
+  /**
+   * Virtual-key private key (PEM) for the EXPERIMENTAL signed_command helper. Read only at send
+   * time on the host where the key lives; never logged or returned.
+   */
+  commandKeyFile?: string;
+  /** Hosts play_video_on_screen may send without allow_unlisted_host (exact, or "*.domain" for subdomains). */
+  videoHostAllowlist: string[];
+  /** JSONL audit log for experimental signed commands (default: audit.jsonl next to the token store). */
+  auditLogPath: string;
+  /** Audit lines record the full VIN of a car confirmed on the account (default true); false = last 6. */
+  auditFullVin: boolean;
   /** Config problems found at start (no secret values). */
   problems: string[];
   /** Non-fatal warnings for stderr (no secret values). */
@@ -285,6 +312,9 @@ export function loadConfig(env: Env = process.env): Config {
   const tokenExport = resolveExportPath(readEnv(ENV.ACCESS_TOKEN_EXPORT_FILE, env), tokenStorePath);
   if (tokenExport.warning) warnings.push(tokenExport.warning);
 
+  const auditLogPath = readEnv(ENV.AUDIT_LOG, env) ?? path.join(path.dirname(tokenStorePath), "audit.jsonl");
+  const videoHostAllowlist = parseHostAllowlist(readEnv(ENV.VIDEO_HOST_ALLOWLIST, env), warnings);
+
   const clientId = readEnvWithAlias(ENV.CLIENT_ID, ENV.CLIENT_ID_ALIAS, env);
   if (!clientId) problems.push(`${ENV.CLIENT_ID} (or ${ENV.CLIENT_ID_ALIAS}) is not set`);
 
@@ -308,9 +338,56 @@ export function loadConfig(env: Env = process.env): Config {
     climate: loadClimate(env, warnings),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
     rates,
+    commandKeyFile: readEnv(ENV.COMMAND_KEY_FILE, env),
+    videoHostAllowlist,
+    auditLogPath,
+    auditFullVin: resolveAuditFullVin(env, warnings),
     problems,
     warnings,
   });
+}
+
+/**
+ * Comma-separated host allowlist. Entries: a host name (exact match) or "*.example.com"
+ * (subdomains only), optionally with ":port" (an entry without a port covers only 443).
+ * Lower-cased and IDNA-normalised; IP literals, paths and other junk are dropped with one
+ * warning (never echoed).
+ */
+export function parseHostAllowlist(raw: string | undefined, warnings: string[]): string[] {
+  if (!raw) return [];
+  const out = new Set<string>();
+  let bad = 0;
+  for (const item of raw.split(",")) {
+    const t = item.trim().toLowerCase();
+    if (!t) continue;
+    const wildcard = t.startsWith("*.");
+    const host = wildcard ? t.slice(2) : t;
+    let norm: string | undefined;
+    let port = "";
+    try {
+      const u = new URL(`https://${host}/`);
+      if (u.hostname && u.pathname === "/" && !u.username && !u.password && !u.search && !u.hash) {
+        norm = u.hostname;
+        port = u.port; // "" for 443 (normalised away) or an explicit non-default port
+      }
+    } catch {
+      norm = undefined;
+    }
+    if (!norm || isIpLiteral(norm) || !norm.includes(".") || norm.endsWith(".")) {
+      bad++;
+      continue;
+    }
+    const entry = wildcard ? `*.${norm}` : norm;
+    out.add(port ? `${entry}:${port}` : entry);
+  }
+  if (bad) warnings.push(`${ENV.VIDEO_HOST_ALLOWLIST}: ${bad} entr${bad === 1 ? "y" : "ies"} ignored (use host names like video.example.com, *.example.com or video.example.com:8443; no IPs or paths).`);
+  return [...out];
+}
+
+/** IPv4 / IPv6 literal (with or without brackets). */
+export function isIpLiteral(host: string): boolean {
+  const h = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  return net.isIP(h) !== 0;
 }
 
 /** set/missing map for describe_boundary. Never values. */

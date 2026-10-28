@@ -1,6 +1,6 @@
 {
   "name": "grokbot-vehicle-fleet",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge",
@@ -176,6 +176,26 @@
         "type": "string",
         "title": "Monthly discount (USD)",
         "description": "Optional. Local usage estimate only. Default 10 (Tesla's monthly discount); 0 allowed."
+      },
+      "TESLA_FLEET_COMMAND_KEY_FILE": {
+        "type": "string",
+        "title": "Command key file (experimental)",
+        "description": "Optional. Absolute path to the virtual-key private key (PEM, P-256) used ONLY by the EXPERIMENTAL play_video_on_screen tool to sign locally (Fleet API signed_command). Set it only on the host that already holds the key (the same key your command proxy uses); never commit it."
+      },
+      "TESLA_FLEET_VIDEO_HOST_ALLOWLIST": {
+        "type": "string",
+        "title": "Video host allowlist (experimental)",
+        "description": "Optional. Comma-separated host names play_video_on_screen may send without a second approval, e.g. video.example.com,*.cdn.example.com (*. = subdomains only). Unset = every host needs allow_unlisted_host=true."
+      },
+      "TESLA_FLEET_AUDIT_LOG": {
+        "type": "string",
+        "title": "Audit log file",
+        "description": "Optional. JSONL audit log for experimental signed commands (full VIN for confirmed account cars, URL host + keyed path hash only). Default: audit.jsonl next to the token store."
+      },
+      "TESLA_FLEET_AUDIT_FULL_VIN": {
+        "type": "string",
+        "title": "Full VIN in audit log",
+        "description": "Optional. Audit lines of experimental signed commands record the full VIN of a car confirmed on the account. On by default; 0/false/no/off keeps the last 6 (an unrecognised value also keeps the last 6, with a warning). Unconfirmed VINs are always cut to the last 4."
       }
     },
     "required": [

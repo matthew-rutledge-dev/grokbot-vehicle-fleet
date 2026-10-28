@@ -87,6 +87,10 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_RATE_COMMANDS_PER_USD` | no | Usage estimate only: commands per USD (default `1000`) |
 | `TESLA_FLEET_RATE_WAKES_PER_USD` | no | Usage estimate only: wakes per USD (default `50`) |
 | `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
+| `TESLA_FLEET_COMMAND_KEY_FILE` | experimental only | Path to the virtual-key **private** key (PEM, P-256) used only by the EXPERIMENTAL `play_video_on_screen` to sign locally. Set it only on the host that already holds the key, `chmod 600` and owned by the server's user (otherwise refused); **never commit** |
+| `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` | no | Comma-separated hosts `play_video_on_screen` may send without a second approval (`video.example.com,*.cdn.example.com`; `*.` = subdomains only; `host:port` to allow a non-default port, which is otherwise always refused). Unset = every host needs `allow_unlisted_host=true` |
+| `TESLA_FLEET_AUDIT_LOG` | no | JSONL audit log for experimental signed commands (default `audit.jsonl` next to the token store, kept `0600` in a `0700` folder; full VIN for cars confirmed on the account, URL host + keyed path hash only; salt in `<log>.salt`) |
+| `TESLA_FLEET_AUDIT_FULL_VIN` | no | Audit lines record the **full VIN** of a car confirmed on the account (picked from the vehicle list or after the online check). **On by default**; `0`/`false`/`no`/`off` keeps the last 6 (an unrecognised value also keeps the last 6, with a warning). A VIN the caller passed that isn't confirmed yet (dry-runs, early refusals, failed checks) is always cut to the last 4. |
 
 **Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
@@ -125,7 +129,7 @@ Ownership reads (no confirm; never wake the vehicle): `get_recent_alerts` (recen
 
 `get_recalls`: the Fleet API has no recalls endpoint, so this reads the public NHTSA recalls API by make, model and model year, which are decoded from the VIN on your machine. **Neither the VIN nor the token is sent to NHTSA**, and the call is not Fleet API usage. Results cover the model year, not the exact car; the Tesla app shows whether a recall applies to and is done on a specific car. The optional `model` argument accepts only `Model S`, `Model 3`, `Model X`, `Model Y` or `Cybertruck` (case-insensitive); anything else is refused with `invalid_arguments` before any call, and a VIN whose first three characters are not a Tesla manufacturer code is not decoded. NHTSA calls are also limited locally (at most one every 5 s and 20 per rolling hour, on top of the 6 h cache); over the limit, `rate_limited_locally` is returned and nothing is sent. To turn NHTSA off entirely, set `TESLA_FLEET_DISABLE_NHTSA=1`.
 
-Tool counts: **22** in the default read-only mode (18 vehicle reads including `get_location` + 4 energy reads), **48** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands); one fewer each with location turned off, and one fewer each with `TESLA_FLEET_DISABLE_NHTSA` on.
+Tool counts: **22** in the default read-only mode (18 vehicle reads including `get_location` + 4 energy reads), **49** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands + the experimental `play_video_on_screen`); one fewer each with location turned off, and one fewer each with `TESLA_FLEET_DISABLE_NHTSA` on.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -163,6 +167,10 @@ Errors are explicit: `vehicle_not_online`, `virtual_key_missing` (with the pairi
 Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AUTH_COMMANDS=1`) adds `vehicle_cmds` and `vehicle_charging_cmds`; `url --energy-commands` (or `TESLA_AUTH_ENERGY_COMMANDS=1`) adds `energy_cmds` (and `energy_device_data`). The default stays read-only.
 
 `door_unlock` and `actuate_trunk` require an explicit `vin`. Local rate limits stay under the documented per-vehicle limits (data 60/min, commands 30/min, wakes 3/min).
+
+### Experimental: `play_video_on_screen`
+
+**EXPERIMENTAL, unverified on live vehicles.** Asks the car to open a video URL on its screen with CarServer `videoRequestAction` (field 57, community-documented, not in Tesla's published protos). Stock `tesla-http-proxy` cannot send it, so the server signs the message itself with the virtual key (`TESLA_FLEET_COMMAND_KEY_FILE`, only on the host that holds the key) and posts it to the Fleet API's `/api/1/vehicles/{VIN}/signed_command` (same Fleet API host as reads; no new endpoint). Same gates as every command (hidden unless read-only is off, dry-run without `confirm`, `user_request`, online + paired checks, no auto-wake, no retry), plus: `https` public host names only (no IPs, localhost, private names or credentials, max 2048 characters), a host allowlist (`TESLA_FLEET_VIDEO_HOST_ALLOWLIST`; other hosts need `allow_unlisted_host=true` after the user approves that host), and an audit log line for every call. Costs 2 billed command requests. Details, the audit format and what is unverified: [docs/EXPERIMENTAL-SIGNED-COMMANDS.md](docs/EXPERIMENTAL-SIGNED-COMMANDS.md). With it, command-mode tool counts are one higher.
 
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
@@ -226,6 +234,7 @@ No other endpoints, no telemetry, no analytics. The plugin does not push a telem
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
+- The experimental `play_video_on_screen` writes an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): the full VIN of a car confirmed on the account (last 4 before that; `TESLA_FLEET_AUDIT_FULL_VIN=0` for the last 6) and the URL host plus a keyed path hash (per-install salt in `<log>.salt`, `0600`) only, never the full URL, query, tokens or keys.
 
 ## Event triggers and telemetry alerts (separate bridge)
 

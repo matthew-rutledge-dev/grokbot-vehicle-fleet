@@ -24,7 +24,9 @@ export const VEHICLE_COMMANDS = [
   "set_charging_amps", "charge_port_door_open", "charge_port_door_close", "share_navigation",
 ];
 export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set_storm_mode", "set_grid_import_export"];
-export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS];
+/** EXPERIMENTAL command tools (signed locally, see src/signed). */
+export const EXPERIMENTAL_COMMANDS = ["play_video_on_screen"];
+export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS, ...EXPERIMENTAL_COMMANDS];
 
 export const VIN = "5YJ000000EXAMPLE";
 export const BASE = "https://fleet-api.example.test";

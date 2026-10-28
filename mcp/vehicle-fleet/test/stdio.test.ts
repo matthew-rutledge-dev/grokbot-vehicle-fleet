@@ -53,7 +53,8 @@ async function connect(extra: Record<string, string>) {
     if (typeof v === "string" && !k.startsWith("TESLA_") && k !== "GROK_PLUGIN_DATA") env[k] = v;
   }
   for (const k of ["TESLA_CLIENT_ID", "TESLA_REFRESH_TOKEN", "TESLA_FLEET_REGION", "TESLA_FLEET_BASE_URL", "TESLA_COMMAND_PROXY_URL",
-    "TESLA_COMMAND_PROXY_CA_CERT", "TESLA_FLEET_READ_ONLY", "TESLA_FLEET_ENABLE_LOCATION", "TESLA_DEFAULT_VIN"]) {
+    "TESLA_COMMAND_PROXY_CA_CERT", "TESLA_FLEET_READ_ONLY", "TESLA_FLEET_ENABLE_LOCATION", "TESLA_DEFAULT_VIN",
+    "TESLA_FLEET_COMMAND_KEY_FILE", "TESLA_FLEET_VIDEO_HOST_ALLOWLIST", "TESLA_FLEET_AUDIT_LOG", "TESLA_FLEET_AUDIT_FULL_VIN"]) {
     env[k] = `\${${k}}`; // unexpanded host placeholders
   }
   env.TESLA_TOKEN_STORE = path.join(tmpDir(), "tokens.json");
@@ -105,7 +106,7 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, "get_location"].sort());
-    assert.equal(names.length, 48);
+    assert.equal(names.length, 49);
     assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));
@@ -146,5 +147,33 @@ test("unrecognised flag stays read-only with exactly one warning; =0 no warning"
     assert.ok(!/not a recognised value/.test(d.stderrText()));
   } finally {
     await d.close();
+  }
+});
+
+test("play_video_on_screen (EXPERIMENTAL): hidden + refused read-only; listed with commands on; dry-run makes no HTTP", async () => {
+  const ro = await connect({ ...live() });
+  try {
+    assert.ok(!(await ro.listTools()).tools.some((t) => t.name === "play_video_on_screen"));
+    const r = text(await ro.callTool({ name: "play_video_on_screen", arguments: { url: "https://video.example.com/a.mp4", confirm: true, user_request: "play it" } }));
+    assert.equal(r.readOnly, true);
+    assert.equal(r.sent, false);
+  } finally {
+    await ro.close();
+  }
+  const on = await connect({ ...live(), TESLA_FLEET_READ_ONLY: "false", TESLA_FLEET_VIDEO_HOST_ALLOWLIST: "video.example.com" });
+  try {
+    const t = (await on.listTools()).tools.find((x) => x.name === "play_video_on_screen");
+    assert.ok(t);
+    assert.match(String(t.description), /^EXPERIMENTAL/);
+    const before = hits.length;
+    const b = text(await on.callTool({ name: "play_video_on_screen", arguments: { url: "https://video.example.com/a.mp4" } }));
+    assert.equal(b.dryRun, true);
+    assert.equal(b.hostAllowlisted, true);
+    assert.equal(b.commandKey, "TESLA_FLEET_COMMAND_KEY_FILE is not set.");
+    const k = text(await on.callTool({ name: "play_video_on_screen", arguments: { url: "https://video.example.com/a.mp4", confirm: true, user_request: "play it" } }));
+    assert.equal(k.code, "command_key_not_configured");
+    assert.equal(hits.length, before, "no HTTP request");
+  } finally {
+    await on.close();
   }
 });

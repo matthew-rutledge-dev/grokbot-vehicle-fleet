@@ -1,6 +1,6 @@
 ---
 name: vehicle-fleet-commands
-description: use this when the user explicitly asks to lock or unlock the car, open the trunk or frunk, warm up or cool the car, turn on the heat, start or stop climate, set the temperature, seat or steering wheel heat, defrost, cabin overheat protection, sentry mode, flash the lights, honk, start or stop charging, set the charge limit or charging amps, open or close the charge port, send a destination to the car, wake it, or change Powerwall settings (backup reserve, operation mode, storm watch, grid import/export)
+description: use this when the user explicitly asks to play a video URL on the car screen (experimental), lock or unlock the car, open the trunk or frunk, warm up or cool the car, turn on the heat, start or stop climate, set the temperature, seat or steering wheel heat, defrost, cabin overheat protection, sentry mode, flash the lights, honk, start or stop charging, set the charge limit or charging amps, open or close the charge port, send a destination to the car, wake it, or change Powerwall settings (backup reserve, operation mode, storm watch, grid import/export)
 ---
 
 # Vehicle fleet commands
@@ -33,6 +33,15 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 - `missing_scope` / `missing_energy_cmds_scope`: the hint names the scope and the auth-helper flag; the operator re-consents (skill vehicle-fleet-setup).
 - `proxy_unreachable` / `proxy_tls_error`: nothing was sent; the operator checks the proxy.
 - Local rate limits (commands 30/min, wakes 3/min per car).
+
+## Experimental: play a video on the car screen
+
+`play_video_on_screen` is EXPERIMENTAL (unverified on live cars). Use it only when the user explicitly asks to play a specific video URL on the car's screen.
+
+1. Call without `confirm` and read back the host (never repeat the full URL) and `hostAllowlisted`.
+2. If `needsAllowUnlistedHost` is true, ask the user to approve that host by name; only after that pass `allow_unlisted_host=true`.
+3. On an explicit yes for this one command: call with `confirm=true` and `user_request`. Each live send needs its own yes.
+4. `ok: true` with `authenticatedResponse: true` means the car accepted the request, not that the video played; with `authenticatedResponse: false` the reply is unverified. Either way ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key (`command_key_insecure_permissions`: the key file needs `chmod 600`). `video_port_not_allowed`: only allowlisted `host:port` entries. `state_unknown`: do not resend.
 
 ## Never
 
