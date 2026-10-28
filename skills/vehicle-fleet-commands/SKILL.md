@@ -36,12 +36,12 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 
 ## Experimental: play a video on the car screen
 
-`play_video_on_screen` is EXPERIMENTAL (unverified on live cars). Use it only when the user explicitly asks to play a specific video URL on the car's screen.
+`play_video_on_screen` ("Open URL on car screen") is EXPERIMENTAL. Use it only when the user explicitly asks to open a specific URL on the car's screen. Tell the user what to expect: a video opens in the player but does not auto-play (they tap play); other https pages open in the car's browser; a later send in the same drive may load in the browser without coming to the front; some sites are accepted and never shown. Local http or IP addresses are refused; suggest a public https name instead.
 
 1. Call without `confirm` and read back the host (never repeat the full URL) and `hostAllowlisted`.
 2. If `needsAllowUnlistedHost` is true, ask the user to approve that host by name; only after that pass `allow_unlisted_host=true`.
 3. On an explicit yes for this one command: call with `confirm=true` and `user_request`. Each live send needs its own yes.
-4. `ok: true` with `authenticatedResponse: true` means the car accepted the request, not that the video played; with `authenticatedResponse: false` the reply is unverified. Either way ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key (`command_key_insecure_permissions`: the key file needs `chmod 600`). `video_port_not_allowed`: only allowlisted `host:port` entries. `state_unknown`: do not resend.
+4. `ok: true` with `authenticatedResponse: true` means the car accepted the request, not that the video played; with `authenticatedResponse: false` the reply is unverified. Either way ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key (`command_key_insecure_permissions`: the key file needs `chmod 600`; a `commandKeyWarning` on Windows means Everyone/Users can read the key, tell the operator). `video_port_not_allowed`: only allowlisted `host:port` entries. `state_unknown`: do not resend.
 
 ## Never
 

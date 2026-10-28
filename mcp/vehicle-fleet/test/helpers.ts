@@ -28,7 +28,7 @@ export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set
 export const EXPERIMENTAL_COMMANDS = ["play_video_on_screen"];
 export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS, ...EXPERIMENTAL_COMMANDS];
 
-export const VIN = "5YJ000000EXAMPLE";
+export const VIN = "5YJ0000000EXAMPLE";
 export const BASE = "https://fleet-api.example.test";
 export const AUTH = "https://fleet-auth.example.test";
 export const PROXY = "https://proxy.example.com";

@@ -158,6 +158,9 @@ test("listed when commands are on; schema marks it EXPERIMENTAL and requires url
   const t = (await c.listTools()).tools.find((x) => x.name === TOOL)!;
   assert.ok(t);
   assert.match(t.description!, /^EXPERIMENTAL/);
+  assert.equal(t.title, "Open URL on car screen (experimental)", "title added; name unchanged for compatibility");
+  assert.match(t.description!, /do not auto-play/);
+  assert.match(t.description!, /web browser/);
   assert.deepEqual(t.inputSchema.required, ["url"]);
   const props = t.inputSchema.properties as Record<string, unknown>;
   for (const k of ["vin", "url", "allow_unlisted_host", "confirm", "user_request"]) assert.ok(k in props, k);
@@ -540,4 +543,24 @@ test("TESLA_FLEET_AUDIT_FULL_VIN=0: a confirmed car is audited with the last 6",
   assert.deepEqual(a.map((x) => x.event), ["attempt", "result"]);
   assert.ok(a.every((x) => x.vin === "…XAMPLE"));
   assert.ok(!fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").includes(VIN));
+});
+
+test("Windows: key file readable by Everyone previews with a non-fatal commandKeyWarning", { skip: process.platform !== "win32" }, async () => {
+  const e = env();
+  const { execFileSync } = await import("node:child_process");
+  execFileSync("icacls", [e.TESLA_FLEET_COMMAND_KEY_FILE, "/grant", "*S-1-1-0:R"], { stdio: "ignore" });
+  const { ctx, calls } = setup(e);
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: TOOL, arguments: { url: URL_OK } }));
+  assert.equal(b.dryRun, true);
+  assert.match(String(b.commandKeyWarning), /broad groups \(Everyone:\(R\)\)/);
+  assert.equal(calls.length, 0);
+});
+
+test("private key file: no commandKeyWarning in the preview", async () => {
+  const { ctx } = setup(env());
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: TOOL, arguments: { url: URL_OK } }));
+  assert.equal(b.dryRun, true);
+  assert.equal("commandKeyWarning" in b, false);
 });

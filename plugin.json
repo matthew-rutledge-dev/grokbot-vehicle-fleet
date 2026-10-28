@@ -1,7 +1,7 @@
 {
   "name": "grokbot-vehicle-fleet",
   "displayName": "Grok Bot Vehicle Fleet",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge"
@@ -116,7 +116,7 @@
       "TESLA_DEFAULT_VIN": {
         "type": "string",
         "title": "Default VIN",
-        "description": "Optional default VIN for reads (placeholder 5YJ000000EXAMPLE). Unlock and trunk always need an explicit vin."
+        "description": "Optional default VIN for reads (placeholder 5YJ0000000EXAMPLE). Unlock and trunk always need an explicit vin."
       },
       "TESLA_DEFAULT_ENERGY_SITE_ID": {
         "type": "string",
