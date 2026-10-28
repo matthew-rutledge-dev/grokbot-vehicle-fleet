@@ -5,7 +5,7 @@ description: use this only when the operator explicitly asks to set up or reconf
 
 # Vehicle fleet setup (operator-driven)
 
-Never run silently. Never ask for secrets in chat; the operator sets plugin variables (or host secrets) and runs commands in their own terminal. Placeholders below: `example-user`, `keys.example.com`, `https://proxy.example.com`, `5YJ000000EXAMPLE`.
+Never run silently. Never ask for secrets in chat; the operator sets plugin variables (or host secrets) and runs commands in their own terminal. Placeholders below: `example-user`, `keys.example.com`, `https://proxy.example.com`, `5YJ0000000EXAMPLE`.
 
 Scope: this plugin is the request and command path only. Event triggers and telemetry alerts (charge, plug, doors, Sentry, battery, updates, grid outage) are set up in the event bridge's Tesla adapter (a separate, self-hosted project, not part of this repository), not here; see the README section "Event triggers and telemetry alerts".
 
@@ -114,7 +114,7 @@ Without Docker, the same flags work on a release build: `tesla-http-proxy -tls-k
 curl --cacert config/ca-cert.pem https://proxy.example.com:4443/health
 # A request without a token is refused by the proxy with 403
 curl --cacert config/ca-cert.pem -o /dev/null -w '%{http_code}\n' -X POST \
-  https://proxy.example.com:4443/api/1/vehicles/5YJ000000EXAMPLE/command/flash_lights
+  https://proxy.example.com:4443/api/1/vehicles/5YJ0000000EXAMPLE/command/flash_lights
 ```
 
 If the first command fails with a certificate error, fix the SAN or the CA file before going further (the plugin never disables TLS verification).

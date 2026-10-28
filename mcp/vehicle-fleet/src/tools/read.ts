@@ -125,7 +125,7 @@ export const READ_TOOLS: ToolDef[] = [
       climateDefaults: ctx.config.climate,
       energy: "Energy sites (Powerwall/solar, Wall Connector via site live_status): reads need energy_device_data; settings commands (backup reserve, operation mode, storm mode, grid import/export) need energy_cmds and are hidden unless read-only is off.",
       experimental: {
-        playVideoOnScreen: "EXPERIMENTAL command (hidden unless read-only is off): signed locally with the virtual key and sent via Fleet API signed_command; unverified on live vehicles.",
+        playVideoOnScreen: "EXPERIMENTAL command (hidden unless read-only is off): signed locally with the virtual key and sent via Fleet API signed_command; opens a URL on the car screen (video player or web browser, no auto-play); field-tested on one car only.",
         commandKeyConfigured: Boolean(ctx.config.commandKeyFile),
         videoHostAllowlistEntries: ctx.config.videoHostAllowlist.length,
         auditLog: "on (JSONL; full VIN for confirmed account cars, URL host + keyed path hash only)",

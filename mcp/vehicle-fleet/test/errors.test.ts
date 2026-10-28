@@ -25,7 +25,7 @@ test("status mapping", () => {
 });
 
 test("redaction helpers", () => {
-  assert.equal(maskVin("5YJ000000EXAMPLE"), "***MPLE");
+  assert.equal(maskVin("5YJ0000000EXAMPLE"), "***MPLE");
   const t = redactSecrets("x seed-refresh-token-EXAMPLE y Bearer abcdefghijkl", ["seed-refresh-token-EXAMPLE"]);
   assert.ok(!t.includes("seed-refresh-token-EXAMPLE"));
   assert.ok(!t.includes("abcdefghijkl"));

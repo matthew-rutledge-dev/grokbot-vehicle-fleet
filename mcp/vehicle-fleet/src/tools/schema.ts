@@ -2,7 +2,7 @@
 export const VIN_PROP = {
   vin: {
     type: "string",
-    description: "Vehicle VIN (e.g. 5YJ000000EXAMPLE). Optional for reads: falls back to TESLA_DEFAULT_VIN or the only vehicle on the account.",
+    description: "Vehicle VIN (e.g. 5YJ0000000EXAMPLE). Optional for reads: falls back to TESLA_DEFAULT_VIN or the only vehicle on the account.",
   },
 } as const;
 
