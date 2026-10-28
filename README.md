@@ -11,7 +11,7 @@ It is **read-only by default**, reads **cached data first**, and **never wakes t
 | Piece | Role |
 |---|---|
 | `vehicle-fleet` MCP (one server) | Read tools: battery/charge, climate, doors/locks/trunks/windows, tires (TPMS), connectivity state, key pairing status, multi-section snapshot, location (on by default, coarse; opt out). Command tools (hidden unless read-only is explicitly off; each needs `confirm=true`): wake, lock/unlock, trunk/frunk, climate start/stop, set temps, charge start/stop, charge limit, send a destination. |
-| Skills | `vehicle-fleet-boundary` (rules), `vehicle-fleet-status`, `vehicle-fleet-commands`, `vehicle-fleet-setup` (operator-driven), `vehicle-fleet-troubleshoot` |
+| Skills | `vehicle-fleet-boundary` (rules), `vehicle-fleet-status`, `vehicle-fleet-commands`, `vehicle-fleet-setup` (operator-driven), `vehicle-fleet-troubleshoot`, `vehicle-fleet-in-car` (in-car intent router; guide in [docs/IN-CAR-ASSISTANT-GUIDE.md](docs/IN-CAR-ASSISTANT-GUIDE.md)) |
 | `scripts/auth-helper.mjs` | Optional, operator-run helper that gets your first refresh token (OAuth code exchange) and writes the token store. Never run by the server or an agent. |
 
 ## Layout
@@ -24,6 +24,7 @@ It is **read-only by default**, reads **cached data first**, and **never wakes t
 | `.cursor-plugin/plugin.json` + `mcp.json` | Cursor manifest + MCP config (`${CURSOR_PLUGIN_ROOT}`) |
 | `mcp/vehicle-fleet/` | TypeScript stdio server (`src/`), tests (`test/`) |
 | `skills/` | Skill folders with `SKILL.md` |
+| `docs/IN-CAR-ASSISTANT-GUIDE.md` | Bot-facing guide: in-car intents to tools, unsupported asks, field notes, examples, related projects |
 | `scripts/bootstrap-mcp.sh` / `.ps1` | Required after clone: `npm ci --ignore-scripts` + `npm run build` |
 | `scripts/auth-helper.mjs` | Optional first-token helper |
 | `assets/logo.svg` | Logo (original artwork) |
