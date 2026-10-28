@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { COMMANDS, READ_TOOLS } from "./helpers.js";
+import { COMMANDS, OPT_IN_COMMANDS, OPT_IN_EXPERIMENTAL_COMMANDS, READ_TOOLS, VALET_COMMANDS } from "./helpers.js";
 import { ALL_TOOL_DEFS, COMMAND_TOOL_NAMES, listTools } from "../src/tools.js";
 
 
@@ -12,7 +12,22 @@ test("read-only mode lists only read tools", () => {
 test("commands appear only when read-only is off; location only when enabled", () => {
   const names = listTools({ readOnly: false, locationEnabled: true }).map((t) => t.name).sort();
   assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, "get_location"].sort());
-  assert.deepEqual([...COMMAND_TOOL_NAMES].sort(), [...COMMANDS].sort());
+  assert.deepEqual([...COMMAND_TOOL_NAMES].sort(), [...COMMANDS, ...OPT_IN_COMMANDS].sort());
+});
+
+test("opt-in commands: valet / experimental extras need read-only off AND their own flag", () => {
+  const names = (m: Parameters<typeof listTools>[0]) => listTools(m).map((t) => t.name);
+  for (const n of OPT_IN_COMMANDS) {
+    assert.ok(!names({ readOnly: false, locationEnabled: true }).includes(n), `${n} hidden by default`);
+    assert.ok(!names({ readOnly: true, locationEnabled: true, valetEnabled: true, experimentalEnabled: true }).includes(n), `${n} hidden when read-only`);
+  }
+  const valet = names({ readOnly: false, locationEnabled: true, valetEnabled: true });
+  assert.ok(VALET_COMMANDS.every((n) => valet.includes(n)));
+  assert.ok(OPT_IN_EXPERIMENTAL_COMMANDS.every((n) => !valet.includes(n)));
+  const exp = names({ readOnly: false, locationEnabled: true, experimentalEnabled: true });
+  assert.ok(OPT_IN_EXPERIMENTAL_COMMANDS.every((n) => exp.includes(n)));
+  assert.ok(VALET_COMMANDS.every((n) => !exp.includes(n)));
+  for (const d of ALL_TOOL_DEFS.filter((x) => x.optIn)) assert.equal(d.kind, "command", d.tool.name);
 });
 
 test("schema audit: no read tool takes confirm; every command requires confirm + user_request props", () => {

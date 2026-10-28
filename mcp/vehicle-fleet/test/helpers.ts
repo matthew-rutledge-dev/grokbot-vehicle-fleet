@@ -16,17 +16,25 @@ export const READ_TOOLS = [
   "get_battery_charge", "get_climate", "get_closures", "get_tires", "get_vehicle_status", "get_vehicle_snapshot",
   "get_recent_alerts", "get_release_notes", "get_service_status", "get_warranty", "get_recalls",
   "list_energy_sites", "get_energy_live_status", "get_energy_site_info", "get_energy_history",
+  "get_security_status", "get_media_state", "get_schedules", "get_wall_connector_charge_history",
 ];
 export const VEHICLE_COMMANDS = [
   "wake_vehicle", "climate_warm_up", "door_lock", "door_unlock", "actuate_trunk", "climate_start", "climate_stop",
   "set_temps", "set_seat_heater", "set_steering_wheel_heater", "set_cabin_overheat_protection", "set_defrost_max",
   "set_sentry_mode", "flash_lights", "honk_horn", "charge_start", "charge_stop", "set_charge_limit",
   "set_charging_amps", "charge_port_door_open", "charge_port_door_close", "share_navigation",
+  "trigger_homelink", "window_control", "set_cop_temp", "set_climate_keeper_mode", "set_auto_seat_climate",
+  "media_toggle_playback", "media_next_track", "media_prev_track", "media_next_fav", "media_prev_fav",
+  "media_volume_up", "media_volume_down", "adjust_volume",
 ];
 export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set_storm_mode", "set_grid_import_export"];
 /** EXPERIMENTAL command tools (signed locally, see src/signed). */
 export const EXPERIMENTAL_COMMANDS = ["play_video_on_screen"];
 export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS, ...EXPERIMENTAL_COMMANDS];
+/** Opt-in command tools: hidden unless read-only is off AND their own flag is on. */
+export const VALET_COMMANDS = ["set_valet_mode", "reset_valet_pin"];
+export const OPT_IN_EXPERIMENTAL_COMMANDS = ["dashcam_save_clip", "remote_boombox"];
+export const OPT_IN_COMMANDS = [...VALET_COMMANDS, ...OPT_IN_EXPERIMENTAL_COMMANDS];
 
 export const VIN = "5YJ0000000EXAMPLE";
 export const BASE = "https://fleet-api.example.test";

@@ -5,8 +5,9 @@ import { describeReadOnly } from "../readonly.js";
 import { maskVin, roundCoord } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import {
-  CHARGE_FIELDS, CLIMATE_FIELDS, CLOSURE_FIELDS, STATUS_FIELDS, TIRE_FIELDS,
-  blockTimestamp, closureSummary, pick, statusSummary, tireSummary,
+  CHARGE_FIELDS, CHARGE_SCHEDULE_FIELDS, CLIMATE_FIELDS, CLOSURE_FIELDS, MEDIA_INFO_FIELDS, PRECONDITION_SCHEDULE_FIELDS,
+  SECURITY_FIELDS, STATUS_FIELDS, TIRE_FIELDS,
+  blockTimestamp, closureSummary, daysOf, hhmm, pick, securitySummary, statusSummary, tireSummary,
 } from "./extract.js";
 import { LIVE_PROP, VIN_PROP } from "./schema.js";
 import type { ToolDef } from "./types.js";
@@ -15,6 +16,7 @@ export const RULES_SUMMARY = [
   "Read-only unless TESLA_FLEET_READ_ONLY is explicitly 0/false/no/off.",
   "Every command needs confirm=true plus user_request; without confirm you get a dry-run.",
   "Never send commands from routines, schedules, triggers, or on the agent's own initiative.",
+  "HomeLink (garage/gate), windows, valet and other access commands: only when the person explicitly asks right now; never automated (no geofence or arrival triggers).",
   "Nothing wakes the vehicle except wake_vehicle (confirm-gated, costs a wake).",
   "Reads default to cached data; live reads only when the vehicle is already online.",
   "Do not poll. Every Fleet API response below 500 is billed.",
@@ -24,14 +26,15 @@ export const RULES_SUMMARY = [
   "Location is on by default (opt out with TESLA_FLEET_ENABLE_LOCATION=0) and coarse (~1 km) unless precise is asked for.",
 ];
 
-type Section = "charge" | "climate" | "closures" | "tires" | "status";
-const ALL_SECTIONS: Section[] = ["charge", "climate", "closures", "tires", "status"];
+type Section = "charge" | "climate" | "closures" | "tires" | "status" | "security";
+const ALL_SECTIONS: Section[] = ["charge", "climate", "closures", "tires", "status", "security"];
 const SECTION_ENDPOINTS: Record<Section, string[]> = {
   charge: ["charge_state"],
   climate: ["climate_state"],
   closures: ["vehicle_state", "closures_state"],
   tires: ["vehicle_state"],
   status: ["vehicle_state"],
+  security: ["vehicle_state"],
 };
 
 function shape(section: Section, data: Record<string, unknown>): Record<string, unknown> {
@@ -55,6 +58,10 @@ function shape(section: Section, data: Record<string, unknown>): Record<string, 
     case "status": {
       const f = pick(data.vehicle_state, STATUS_FIELDS);
       return { timestamp: blockTimestamp(data.vehicle_state), ...statusSummary(f) };
+    }
+    case "security": {
+      const f = pick(data.vehicle_state, SECURITY_FIELDS);
+      return { timestamp: blockTimestamp(data.vehicle_state), ...securitySummary(f) };
     }
   }
 }
@@ -129,6 +136,13 @@ export const READ_TOOLS: ToolDef[] = [
         commandKeyConfigured: Boolean(ctx.config.commandKeyFile),
         videoHostAllowlistEntries: ctx.config.videoHostAllowlist.length,
         auditLog: "on (JSONL; full VIN for confirmed account cars, URL host + keyed path hash only)",
+        signedExtrasEnabled: ctx.config.experimentalEnabled,
+        signedExtras: "dashcam_save_clip and remote_boombox: listed only when read-only is off AND TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS is on.",
+      },
+      valet: {
+        enabled: ctx.config.valetEnabled,
+        pinConfigured: ctx.config.valetPinConfigured,
+        rule: "set_valet_mode / reset_valet_pin: listed only when read-only is off AND TESLA_FLEET_ENABLE_VALET is on. The PIN comes only from TESLA_FLEET_VALET_PIN and is never shown.",
       },
     }),
   },
@@ -198,11 +212,61 @@ export const READ_TOOLS: ToolDef[] = [
   sectionTool("get_closures", "closures", "Locked state, doors, trunks/frunk, windows, sentry mode"),
   sectionTool("get_tires", "tires", "Tire pressures (TPMS, bar + psi), psi below the recommended cold pressure, and soft/hard warnings"),
   sectionTool("get_vehicle_status", "status", "Firmware version, software update available / downloading / installing (version, %), odometer (mi + km) and service mode"),
+  sectionTool("get_security_status", "security", "Valet Mode on/off and whether a valet PIN is needed, Speed Limit Mode (active, limit, PIN set), and whether a HomeLink device is nearby (never the PIN itself)"),
+  {
+    kind: "read",
+    tool: {
+      name: "get_media_state",
+      description: "Media now playing, playback status, source and volume (0 to audio_volume_max, usually 11; adjust_volume takes 0-10). Live only (cached data has no media): the vehicle must already be online; one billable data call; never wakes.",
+      inputSchema: { type: "object", properties: { ...VIN_PROP } },
+    },
+    handler: async (args, ctx) => {
+      const vin = await ctx.fleet.resolveVin(args.vin);
+      await ctx.fleet.requireOnline(vin);
+      const { data, ageSec } = await ctx.fleet.vehicleDataLive(vin, ["vehicle_state"]);
+      const vs = (data.vehicle_state ?? {}) as Record<string, unknown>;
+      const info = pick(vs.media_info ?? data.media_info, MEDIA_INFO_FIELDS);
+      const state = pick(vs.media_state ?? data.media_state, ["remote_control_enabled"]);
+      return {
+        ok: true, vinLast4: vin.slice(-4), source: "live", servedFromMemorySec: ageSec,
+        media: Object.keys(info).length ? info : "not reported (nothing playing, or not available on this car)",
+        ...(Object.keys(state).length ? { remoteControlEnabled: state.remote_control_enabled } : {}),
+      };
+    },
+  },
+  {
+    kind: "read",
+    tool: {
+      name: "get_schedules",
+      description: "Charge schedules and preconditioning (departure) schedules saved in the car: name, days, start/end or departure time (HH:MM, car local time), on/off, one-time. Schedule locations are left out. Read-only: this server never changes schedules. Live only: the vehicle must already be online; one billable data call; never wakes.",
+      inputSchema: { type: "object", properties: { ...VIN_PROP } },
+    },
+    handler: async (args, ctx) => {
+      const vin = await ctx.fleet.resolveVin(args.vin);
+      await ctx.fleet.requireOnline(vin);
+      const { data, ageSec } = await ctx.fleet.vehicleDataLive(vin, ["charge_schedule_data", "preconditioning_schedule_data"]);
+      const cs = (data.charge_schedule_data ?? {}) as Record<string, unknown>;
+      const ps = (data.preconditioning_schedule_data ?? {}) as Record<string, unknown>;
+      const list = (v: unknown) => (Array.isArray(v) ? (v as unknown[]).slice(0, 50) : []);
+      return {
+        ok: true, vinLast4: vin.slice(-4), source: "live", servedFromMemorySec: ageSec,
+        chargeSchedules: list(cs.charge_schedules).map((e) => {
+          const x = pick(e, CHARGE_SCHEDULE_FIELDS);
+          return { ...x, days: daysOf(x.days_of_week), start: x.start_enabled ? hhmm(x.start_time) : undefined, end: x.end_enabled ? hhmm(x.end_time) : undefined };
+        }),
+        preconditionSchedules: list(ps.precondition_schedules).map((e) => {
+          const x = pick(e, PRECONDITION_SCHEDULE_FIELDS);
+          return { ...x, days: daysOf(x.days_of_week), departure: hhmm(x.precondition_time) };
+        }),
+        note: "Times are minutes after midnight in the car's local time (shown as HH:MM). Schedule locations are not returned.",
+      };
+    },
+  },
   {
     kind: "read",
     tool: {
       name: "get_vehicle_snapshot",
-      description: "Several sections in ONE call (cheaper than separate reads): any of charge, climate, closures, tires, status. Cached by default; live=true only when online. Never wakes.",
+      description: "Several sections in ONE call (cheaper than separate reads): any of charge, climate, closures, tires, status, security. Cached by default; live=true only when online. Never wakes.",
       inputSchema: {
         type: "object",
         properties: {
@@ -211,7 +275,7 @@ export const READ_TOOLS: ToolDef[] = [
           sections: {
             type: "array",
             items: { type: "string", enum: ALL_SECTIONS },
-            description: "Default: all five.",
+            description: "Default: all six.",
           },
         },
       },

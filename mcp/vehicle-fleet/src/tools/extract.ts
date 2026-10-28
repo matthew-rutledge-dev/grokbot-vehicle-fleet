@@ -18,14 +18,18 @@ export const CHARGE_FIELDS = [
   "charge_limit_soc", "charging_state", "charge_rate", "charger_power", "charger_voltage", "charger_actual_current",
   "charge_amps", "charge_current_request", "minutes_to_full_charge", "time_to_full_charge",
   "charge_energy_added", "charge_port_door_open", "conn_charge_cable", "fast_charger_present",
-  "scheduled_charging_mode", "scheduled_charging_start_time",
+  "scheduled_charging_mode", "scheduled_charging_start_time", "scheduled_charging_pending",
+  "charge_current_request_max", "preconditioning_enabled",
 ] as const;
 
 export const CLIMATE_FIELDS = [
   "inside_temp", "outside_temp", "driver_temp_setting", "passenger_temp_setting", "is_climate_on",
   "is_auto_conditioning_on", "is_preconditioning", "climate_keeper_mode", "defrost_mode",
   "is_front_defroster_on", "is_rear_defroster_on", "fan_status", "cabin_overheat_protection",
-  "seat_heater_left", "seat_heater_right", "steering_wheel_heater", "min_avail_temp", "max_avail_temp",
+  "seat_heater_left", "seat_heater_right", "seat_heater_rear_left", "seat_heater_rear_center", "seat_heater_rear_right",
+  "steering_wheel_heater", "steering_wheel_heat_level", "auto_steering_wheel_heat",
+  "auto_seat_climate_left", "auto_seat_climate_right", "cop_activation_temperature",
+  "min_avail_temp", "max_avail_temp",
 ] as const;
 
 export const CLOSURE_FIELDS = [
@@ -41,6 +45,50 @@ export const TIRE_FIELDS = [
   "tpms_last_seen_pressure_time_rl", "tpms_last_seen_pressure_time_rr",
   "tpms_rcp_front_value", "tpms_rcp_rear_value",
 ] as const;
+
+/**
+ * Security / access state (vehicle_state). Names per the vehicle_data_equivalent column of Tesla's Fleet
+ * Telemetry field list; valet_pin_needed per vehicle.proto VehicleState. Tesla's list swaps the two
+ * HomeLink descriptions (homelink_nearby is the boolean, homelink_device_count the number).
+ */
+export const SECURITY_FIELDS = ["valet_mode", "valet_pin_needed", "speed_limit_mode", "homelink_nearby", "homelink_device_count"] as const;
+export const SPEED_LIMIT_FIELDS = ["active", "current_limit_mph", "max_limit_mph", "min_limit_mph", "pin_code_set"] as const;
+
+export function securitySummary(f: Record<string, unknown>): Record<string, unknown> {
+  const slm = pick(f.speed_limit_mode, SPEED_LIMIT_FIELDS);
+  return {
+    valetMode: f.valet_mode,
+    valetPinNeeded: f.valet_pin_needed,
+    speedLimitMode: Object.keys(slm).length ? slm : undefined,
+    homelinkNearby: f.homelink_nearby,
+    homelinkDeviceCount: f.homelink_device_count,
+  };
+}
+
+/** Media (vehicle_state.media_info / media_state; live only: cached data never has media). */
+export const MEDIA_INFO_FIELDS = [
+  "audio_volume", "audio_volume_increment", "audio_volume_max", "media_playback_status", "now_playing_source",
+  "now_playing_title", "now_playing_artist", "now_playing_album", "now_playing_station", "now_playing_duration",
+  "now_playing_elapsed", "a2dp_source_name",
+] as const;
+
+/** Schedule fields kept (ids, names, days, times). Schedule latitude/longitude are left out. */
+export const CHARGE_SCHEDULE_FIELDS = ["id", "name", "days_of_week", "start_enabled", "start_time", "end_enabled", "end_time", "one_time", "enabled"] as const;
+export const PRECONDITION_SCHEDULE_FIELDS = ["id", "name", "days_of_week", "precondition_time", "one_time", "enabled"] as const;
+
+const DAY_BITS: Array<[number, string]> = [[1, "Sun"], [2, "Mon"], [4, "Tue"], [8, "Wed"], [16, "Thu"], [32, "Fri"], [64, "Sat"]];
+
+/** days_of_week bitmask (Sun = 1 ... Sat = 64, per vehicle-command's proxy) to day names. */
+export function daysOf(mask: unknown): string[] | undefined {
+  if (typeof mask !== "number" || !Number.isInteger(mask) || mask < 0) return undefined;
+  return DAY_BITS.filter(([b]) => (mask & b) !== 0).map(([, d]) => d);
+}
+
+/** Minutes after midnight to "HH:MM". */
+export function hhmm(min: unknown): string | undefined {
+  if (typeof min !== "number" || !Number.isInteger(min) || min < 0 || min >= 24 * 60) return undefined;
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`;
+}
 
 /** Firmware, pending software update, odometer, service mode (vehicle_state; names per the Fleet Telemetry field mapping). */
 export const STATUS_FIELDS = ["car_version", "odometer", "service_mode", "software_update"] as const;

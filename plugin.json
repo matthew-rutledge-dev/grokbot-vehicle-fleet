@@ -1,7 +1,7 @@
 {
   "name": "grokbot-vehicle-fleet",
   "displayName": "Grok Bot Vehicle Fleet",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge"
@@ -197,6 +197,21 @@
         "type": "string",
         "title": "Audit log file",
         "description": "Optional. JSONL audit log for experimental signed commands (full VIN for confirmed account cars, URL host + keyed path hash only). Default: audit.jsonl next to the token store."
+      },
+      "TESLA_FLEET_ENABLE_VALET": {
+        "type": "string",
+        "title": "Enable valet commands (opt-in)",
+        "description": "Optional, default off. 1/true/yes/on lists set_valet_mode and reset_valet_pin (read-only must also be off). Anything else keeps them hidden."
+      },
+      "TESLA_FLEET_VALET_PIN": {
+        "type": "string",
+        "title": "Valet PIN (secret)",
+        "description": "Optional. The 4-digit Valet Mode PIN used by set_valet_mode on. Keep it in your secret store; it is never a tool argument and never logged or shown. Never commit."
+      },
+      "TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS": {
+        "type": "string",
+        "title": "Enable experimental signed extras (opt-in)",
+        "description": "Optional, default off. 1/true/yes/on lists the EXPERIMENTAL dashcam_save_clip and remote_boombox (signed locally with TESLA_FLEET_COMMAND_KEY_FILE; read-only must also be off)."
       },
       "TESLA_FLEET_AUDIT_FULL_VIN": {
         "type": "string",

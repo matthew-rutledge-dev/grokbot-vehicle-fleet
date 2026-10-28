@@ -193,7 +193,7 @@ test("TESLA_FLEET_DISABLE_NHTSA hides and refuses get_recalls; nothing is sent",
     const names = (await c.listTools()).tools.map((t) => t.name);
     assert.ok(!names.includes("get_recalls"), v);
     assert.ok(names.includes("get_warranty"), v);
-    assert.equal(names.length, 21, v);
+    assert.equal(names.length, 25, v);
     const r = await c.callTool({ name: "get_recalls", arguments: { vin: VIN17 } });
     assert.equal(isError(r), true);
     assert.equal(body(r).nhtsaEnabled, false);
@@ -206,7 +206,7 @@ test("TESLA_FLEET_DISABLE_NHTSA hides and refuses get_recalls; nothing is sent",
     assert.equal(ctx.config.nhtsaEnabled, true, v);
     const names = (await (await connect(ctx)).listTools()).tools.map((t) => t.name);
     assert.ok(names.includes("get_recalls"), v);
-    assert.equal(names.length, 22, v);
+    assert.equal(names.length, 26, v);
   }
 });
 

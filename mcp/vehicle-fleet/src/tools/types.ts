@@ -9,5 +9,10 @@ export type ToolDef = {
   kind: ToolKind;
   /** Calls the public NHTSA API: hidden and refused when TESLA_FLEET_DISABLE_NHTSA is on. */
   nhtsa?: boolean;
+  /**
+   * Extra opt-in for a command tool, on top of read-only being off: "valet" needs TESLA_FLEET_ENABLE_VALET,
+   * "experimental" needs TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS. Hidden and refused otherwise.
+   */
+  optIn?: "valet" | "experimental";
   handler: (args: ToolArgs, ctx: ToolContext) => Promise<Record<string, unknown>>;
 };

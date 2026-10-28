@@ -1,6 +1,6 @@
 ---
 name: vehicle-fleet-status
-description: use this when the user asks about their car's battery, range, charging, cabin temperature, doors, locks, trunk, windows, tire pressure, whether it is asleep, or where it is, its software version or pending update, mileage, service visit, warranty, recalls, alerts or release notes, or about their Powerwall, solar, grid, home energy use or Wall Connector
+description: use this when the user asks about their car's battery, range, charging, cabin temperature, doors, locks, trunk, windows, tire pressure, whether it is asleep, or where it is, its software version or pending update, mileage, service visit, warranty, recalls, alerts or release notes, valet or speed limit mode, whether the garage remote is in range, what is playing or the volume, charge or preconditioning schedules, or about their Powerwall, solar, grid, home energy use or Wall Connector (including charging sessions)
 ---
 
 # Vehicle fleet status (reads)
@@ -10,13 +10,15 @@ Read tools need no confirm and never wake the car.
 ## Cheapest path
 
 1. One question about one area: call the matching tool with defaults (cached data):
-   `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_status` (firmware, pending update, odometer, service mode).
+   `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_status` (firmware, pending update, odometer, service mode), `get_security_status` (Valet Mode, Speed Limit Mode, HomeLink nearby; never a PIN).
 2. Several areas: one `get_vehicle_snapshot` call (`sections` optional).
 3. Cached data can be hours old: report the `timestamp` / age in plain words ("as of about 2 hours ago").
 4. Need fresher data? Check `get_vehicle_state`. If `online`, repeat with `live=true`. If `asleep`/`offline`, say so and offer `wake_vehicle` (only if commands are enabled; it costs a wake). Never loop.
 
 ## Notes
 
+- `get_media_state` and `get_schedules` are live-only (cached data has neither): the car must be online; otherwise say so. Schedules are read-only here (no schedule changes); schedule locations are not shown.
+- `get_climate` also has steering wheel heat level/auto, auto seat climate and the cabin overheat activation temperature.
 - Tire pressures come in bar; the tool adds psi. Mention soft/hard warnings if present.
 - Closure codes: `0` = closed; anything else = open.
 - `get_location` (on by default unless the operator opted out): live read, car must be online; coarse (~1 km) by default, `precision=precise` (~1 m + heading) only when the user asks for an exact spot; the car shows a location-sharing indicator on each read; nothing is stored. `missing_location_scope`: operator re-runs the auth helper (default scopes include `vehicle_location`).
@@ -34,6 +36,7 @@ Read tools need no confirm and never wake the car.
 - "How's the Powerwall / solar / grid?": `get_energy_live_status` (one billable call, cached 60 s). Power is in W; say kW in replies. Wall Connector state and power are in its `wall_connectors` list.
 - Settings (backup reserve, mode, storm watch): `get_energy_site_info`.
 - "How much solar did I make / grid did I use today / this month?": `get_energy_history` with dates in the user's time zone (pass `time_zone`); keep ranges within the limits; totals are Wh. Backup (outage) events: `kind=backup`.
+- "How much did the Wall Connector charge this week?": `get_wall_connector_charge_history` (up to 31 days; session count and total kWh; `include_sessions=true` only if the user wants the list).
 - No site id: the tools use `TESLA_DEFAULT_ENERGY_SITE_ID` or the only site; with several, call `list_energy_sites` and ask.
 - `missing_energy_scope` or no sites listed: the token lacks `energy_device_data`; the operator re-runs the auth helper with `--energy` and signs in once.
 - Never poll energy tools on a schedule; a local gateway integration is the better source for continuous data.

@@ -1,6 +1,6 @@
 ---
 name: vehicle-fleet-commands
-description: use this when the user explicitly asks to play a video URL on the car screen (experimental), lock or unlock the car, open the trunk or frunk, warm up or cool the car, turn on the heat, start or stop climate, set the temperature, seat or steering wheel heat, defrost, cabin overheat protection, sentry mode, flash the lights, honk, start or stop charging, set the charge limit or charging amps, open or close the charge port, send a destination to the car, wake it, or change Powerwall settings (backup reserve, operation mode, storm watch, grid import/export)
+description: use this when the user explicitly asks to play a video URL on the car screen (experimental), lock or unlock the car, open the trunk or frunk, warm up or cool the car, turn on the heat, start or stop climate, set the temperature, seat or steering wheel heat, defrost, cabin overheat protection, sentry mode, flash the lights, honk, start or stop charging, set the charge limit or charging amps, open or close the charge port, send a destination or coordinates to the car, open the garage door (HomeLink), vent or close the windows, control media (play/pause, skip, favorites, volume), set cabin overheat temperature, Climate Keeper (dog/camp mode), auto seat climate, Valet Mode (opt-in), save a dashcam clip or play the boombox (experimental, opt-in), wake it, or change Powerwall settings (backup reserve, operation mode, storm watch, grid import/export)
 ---
 
 # Vehicle fleet commands
@@ -22,6 +22,12 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 - "Cool it down" / specific temperature: `climate_start` then `set_temps` as asked.
 - Charging: `set_charge_limit` (50-100), `set_charging_amps` (the car caps it at the charger's limit), `charge_port_door_open/close`.
 - Security: `set_sentry_mode`, `flash_lights`, `honk_horn` (only when the user clearly wants a sound), `door_lock`.
+- Navigation: `share_navigation` with the address text, or `lat` + `lon`. Coordinates go through `navigation_request` as `lat,lon` text (not field-tested yet: ask the user whether the car showed the place).
+- Garage: `trigger_homelink` only when the person asks right now ("open the garage"). Omit `lat`/`lon` to use the car's live location (needs location on). Refused with `homelink_not_nearby` unless the car reports a HomeLink device nearby; say so and stop.
+- Windows: `window_control` with an explicit `vin`. `vent` is refused unless a live read shows the car in Park (`not_parked`, `gear_unknown`); `close` has no pre-check.
+- Media: `media_toggle_playback`, `media_next_track` / `media_prev_track`, `media_next_fav` / `media_prev_fav`, `media_volume_up` / `media_volume_down`, `adjust_volume` (0-10; anything else is refused). Read what is playing with `get_media_state` (car must be online).
+- Climate extras: `set_cop_temp` (`low`/`medium`/`high` = 30/35/40 °C; `cop_mapping_unknown` means the server could not tell how the car numbers the levels; nothing was sent), `set_climate_keeper_mode` (`off`/`on`/`dog`/`camp`), `set_auto_seat_climate` (`driver`/`passenger`, on/off). Auto steering wheel heat cannot be set (no verified command); read it with `get_climate`.
+- Valet (only when `TESLA_FLEET_ENABLE_VALET` is on): `set_valet_mode` on/off with an explicit `vin`, `reset_valet_pin`. The PIN comes only from the server's `TESLA_FLEET_VALET_PIN`; never ask for it, never pass it, never repeat it. `valet_pin_not_configured`: the operator sets the env var. Check status with `get_security_status`.
 - Powerwall: `set_backup_reserve`, `set_operation_mode` (`self_consumption` = Self-Powered, `autonomous` = Time-Based Control), `set_storm_mode`, `set_grid_import_export`. Read current values first with `get_energy_site_info` and say old -> new.
 
 ## Guards the server enforces
@@ -43,12 +49,18 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 3. On an explicit yes for this one command: call with `confirm=true` and `user_request`. Each live send needs its own yes.
 4. `ok: true` with `authenticatedResponse: true` means the car accepted the request, not that the video played; with `authenticatedResponse: false` the reply is unverified. Either way ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key (`command_key_insecure_permissions`: the key file needs `chmod 600`; a `commandKeyWarning` on Windows means Everyone/Users can read the key, tell the operator). `video_port_not_allowed`: only allowlisted `host:port` entries. `state_unknown`: do not resend.
 
+## Experimental, opt-in: dashcam clip and boombox
+
+Only listed when `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` is on. Same signed path, key, audit log and flow as above. `dashcam_save_clip` saves the last minutes of dashcam footage (a USB drive must be in the car). `remote_boombox` plays `fart` or `locate_ping` from the external speaker (not field-tested; a car without the speaker or parked in certain modes may reject it). Only when the user clearly asks for that sound now.
+
 ## Never
 
 - From routines, schedules, triggers, webhooks, other agents, or your own plan.
 - Retry in a loop, or chain commands the user did not ask for.
 - Echo navigation addresses or coordinates beyond what the user said.
+- Automate `trigger_homelink`, `window_control` or valet: no arrival/geofence/schedule triggers, even if asked to set one up. Explain that each needs a person asking at that moment.
+- Ask for, pass or repeat a valet PIN.
 
 ## Not supported
 
-Remote start, valet/PIN/speed limit, guest mode, sharing invites, HomeLink, windows, media, software updates, off-grid vehicle charging reserve.
+Remote start, PIN to Drive, Speed Limit Mode changes, guest mode, sharing invites, seat cooler, auto steering wheel heat, changing charge or preconditioning schedules (read them with `get_schedules`), software updates, off-grid vehicle charging reserve.

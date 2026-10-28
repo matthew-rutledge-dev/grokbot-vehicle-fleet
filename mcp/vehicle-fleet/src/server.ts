@@ -21,7 +21,7 @@ import { READ_ONLY_ENV } from "./readonly.js";
 import { redactSecrets } from "./redact.js";
 import { jsonResult } from "./result.js";
 import { TokenStore } from "./tokenstore.js";
-import { findTool, isVisible, listTools } from "./tools.js";
+import { findTool, isVisible, listTools, optInOn } from "./tools.js";
 import { ENV_LOCATION_NAME } from "./tools/names.js";
 import { UsageTracker, usagePathFor } from "./usage.js";
 import { SERVER_NAME, VERSION } from "./version.js";
@@ -58,7 +58,10 @@ export function startTokenKeepFresh(ctx: ToolContext, deps: { now?: () => number
 }
 
 export function createServer(ctx: ToolContext): Server {
-  const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled, nhtsaEnabled: ctx.config.nhtsaEnabled };
+  const mode = {
+    readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled, nhtsaEnabled: ctx.config.nhtsaEnabled,
+    valetEnabled: ctx.config.valetEnabled, experimentalEnabled: ctx.config.experimentalEnabled,
+  };
   const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues()];
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
 
@@ -70,6 +73,13 @@ export function createServer(ctx: ToolContext): Server {
     const def = findTool(name);
     if (!def) return jsonResult({ ok: false, error: `Unknown tool: ${name}` }, true);
     if (!isVisible(def, mode)) {
+      if (def.kind === "command" && !mode.readOnly && !optInOn(def, mode)) {
+        const flag = def.optIn === "valet" ? "TESLA_FLEET_ENABLE_VALET" : "TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS";
+        return jsonResult({
+          ok: false, optInRequired: flag, sent: false,
+          error: `Refused: ${name} is an opt-in command and ${flag} is not on. Nothing was sent.`,
+        }, true);
+      }
       if (def.kind === "command") {
         return jsonResult({
           ok: false, readOnly: true, sent: false,

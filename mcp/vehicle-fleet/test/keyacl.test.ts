@@ -8,7 +8,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
-import { parseIcaclsBroadAccess, windowsKeyAclWarning } from "../src/tools/keyacl.js";
+import { icaclsPath, parseIcaclsBroadAccess, windowsKeyAclWarning } from "../src/tools/keyacl.js";
 import { tmpDir } from "./helpers.js";
 
 const FILE = "C:\\keys\\command-key.pem";
@@ -49,26 +49,43 @@ test("parseIcaclsBroadAccess: a path containing a broad name or colons does not 
   assert.deepEqual(parseIcaclsBroadAccess(ok(file)), []);
 });
 
-test("windowsKeyAclWarning: off on non-Windows, unset file, or icacls failure; warns on broad access (never throws)", () => {
+test("windowsKeyAclWarning: off on non-Windows, unset file, or icacls failure; warns on broad access (never throws)", async () => {
   let calls = 0;
   const run = () => { calls++; return `${FILE} Everyone:(R)\n`; };
-  assert.equal(windowsKeyAclWarning(FILE, { platform: "linux", run }), undefined);
-  assert.equal(windowsKeyAclWarning(undefined, { platform: "win32", run }), undefined);
+  assert.equal(await windowsKeyAclWarning(FILE, { platform: "linux", run }), undefined);
+  assert.equal(await windowsKeyAclWarning(undefined, { platform: "win32", run }), undefined);
   assert.equal(calls, 0, "icacls not run off Windows or without a file");
-  assert.equal(windowsKeyAclWarning(FILE, { platform: "win32", run: () => { throw new Error("icacls missing"); } }), undefined);
-  assert.equal(windowsKeyAclWarning(FILE, { platform: "win32", run: () => ok(FILE) }), undefined);
-  const w = windowsKeyAclWarning(FILE, { platform: "win32", run });
+  assert.equal(await windowsKeyAclWarning(FILE, { platform: "win32", run: () => { throw new Error("icacls missing"); } }), undefined);
+  assert.equal(await windowsKeyAclWarning(FILE, { platform: "win32", run: async () => { throw new Error("timeout"); } }), undefined);
+  assert.equal(await windowsKeyAclWarning(FILE, { platform: "win32", run: () => ok(FILE) }), undefined);
+  const w = await windowsKeyAclWarning(FILE, { platform: "win32", run: async () => run() });
   assert.match(w!, /^Windows: TESLA_FLEET_COMMAND_KEY_FILE is accessible to broad groups \(Everyone:\(R\)\)/);
   assert.match(w!, /Not enforced/);
   assert.ok(!w!.includes(FILE), "path not echoed");
 });
 
-test("windowsKeyAclWarning on a real Windows file: private = none; Everyone:R = warning", { skip: process.platform !== "win32" }, () => {
+test("icaclsPath: %SystemRoot%\\System32\\icacls.exe (windir fallback, then C:\\Windows); never a bare PATH lookup", () => {
+  assert.equal(icaclsPath({ SystemRoot: "D:\\Win" }), "D:\\Win\\System32\\icacls.exe");
+  assert.equal(icaclsPath({ windir: "E:\\Windows" }), "E:\\Windows\\System32\\icacls.exe");
+  assert.equal(icaclsPath({}), "C:\\Windows\\System32\\icacls.exe");
+});
+
+test("windowsKeyAclWarning is async: a slow icacls does not block the event loop", async () => {
+  let ticked = false;
+  const slow = () => new Promise<string>((r) => setTimeout(() => r(ok(FILE)), 50));
+  const p = windowsKeyAclWarning(FILE, { platform: "win32", run: slow });
+  setImmediate(() => { ticked = true; });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(ticked, true, "event loop kept running while icacls ran");
+  assert.equal(await p, undefined);
+});
+
+test("windowsKeyAclWarning on a real Windows file: private = none; Everyone:R = warning", { skip: process.platform !== "win32" }, async () => {
   const p = path.join(tmpDir(), "command-key.pem");
   fs.writeFileSync(p, crypto.randomBytes(16).toString("hex"));
   const me = process.env.USERNAME!;
   execFileSync("icacls", [p, "/inheritance:r", "/grant:r", `${me}:F`], { stdio: "ignore" });
-  assert.equal(windowsKeyAclWarning(p), undefined);
+  assert.equal(await windowsKeyAclWarning(p), undefined);
   execFileSync("icacls", [p, "/grant", "*S-1-1-0:R"], { stdio: "ignore" });
-  assert.match(windowsKeyAclWarning(p) ?? "", /broad groups \(Everyone:\(R\)\)/);
+  assert.match((await windowsKeyAclWarning(p)) ?? "", /broad groups \(Everyone:\(R\)\)/);
 });
