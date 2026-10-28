@@ -1,7 +1,9 @@
 /**
  * Append-only JSONL audit log for experimental signed commands.
- * Entries record the full VIN (a VIN is not a secret) but never a full URL,
- * a query string, a token or key material: callers pass already-reduced fields. URL paths are
+ * Entries record the full VIN only for a car confirmed on the account (a VIN
+ * is not a secret; TESLA_FLEET_AUDIT_FULL_VIN=0 keeps the last 6), and only
+ * the last 4 of an unconfirmed caller-supplied VIN. Never a full URL, a query
+ * string, a token or key material: callers pass already-reduced fields. URL paths are
  * recorded only as a KEYED hash (HMAC-SHA256 with a per-install random salt
  * kept next to the log as "<log>.salt", 0600), so a short or guessable path
  * cannot be recovered by hashing candidates without that file.
@@ -24,11 +26,18 @@ export type AuditEntry = {
   [k: string]: unknown;
 };
 
-/** Full VIN for audit entries (17 VIN characters, upper-cased); null when unknown or not VIN-shaped. */
-export function auditVin(vin: string | undefined | null): string | null {
+/**
+ * VIN for audit entries; null when unknown or not VIN-shaped (17 characters, no I/O/Q).
+ * - confirmed (on the account: from the vehicle list or after the online check) and fullVin on: the full VIN.
+ * - confirmed and fullVin off: "…" + last 6.
+ * - not confirmed (any caller-supplied string): "…" + last 4, like the bridge's masking of foreign VINs.
+ */
+export function auditVin(vin: string | undefined | null, opts: { confirmed: boolean; fullVin: boolean }): string | null {
   if (!vin) return null;
   const v = String(vin).trim().toUpperCase();
-  return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : null;
+  if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(v)) return null;
+  if (!opts.confirmed) return `…${v.slice(-4)}`;
+  return opts.fullVin ? v : `…${v.slice(-6)}`;
 }
 
 const POSIX = process.platform !== "win32" && typeof process.getuid === "function";

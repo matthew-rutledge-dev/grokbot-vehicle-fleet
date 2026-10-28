@@ -64,7 +64,7 @@ function assertAuditHygiene(e: Record<string, string>) {
   const raw = fs.existsSync(e.TESLA_FLEET_AUDIT_LOG) ? fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8") : "";
   for (const l of raw.split("\n").filter(Boolean)) {
     const v = (JSON.parse(l) as { vin?: unknown }).vin;
-    assert.ok(v === undefined || v === null || v === VIN, "audit vin is the full VIN (or null)");
+    assert.ok(v === undefined || v === null || v === VIN || v === "…MPLE" || v === "…XAMPLE", "audit vin is the full VIN, a masked tail, or null");
   }
   assert.ok(!raw.includes("SECRET-QUERY"), "no query string");
   assert.ok(!raw.includes("/clips/intro.mp4"), "no path");
@@ -76,12 +76,26 @@ const fake = (o: Partial<FakeVehicleOptions> = {}) => new FakeVehicle({ vin: VIN
 
 // ---------- audit VIN ----------
 
-test("auditVin: full 17-character VIN, upper-cased; null when unknown or not VIN-shaped", () => {
-  assert.equal(auditVin(VIN), VIN);
-  assert.equal(auditVin(` ${VIN.toLowerCase()} `), VIN);
-  assert.equal(auditVin(undefined), null);
-  assert.equal(auditVin("SHORT"), null);
-  assert.equal(auditVin(`${VIN}\n{"x":1}`), null);
+test("auditVin: full VIN only when confirmed (and on); last 6 when off; last 4 when unconfirmed; null when unknown or not VIN-shaped", () => {
+  const on = { confirmed: true, fullVin: true };
+  assert.equal(auditVin(VIN, on), VIN);
+  assert.equal(auditVin(` ${VIN.toLowerCase()} `, on), VIN);
+  assert.equal(auditVin(VIN, { confirmed: true, fullVin: false }), "…XAMPLE");
+  assert.equal(auditVin(VIN, { confirmed: false, fullVin: true }), "…MPLE");
+  assert.equal(auditVin(VIN, { confirmed: false, fullVin: false }), "…MPLE");
+  assert.equal(auditVin(undefined, on), null);
+  assert.equal(auditVin("SHORT", on), null);
+  assert.equal(auditVin(`${VIN}\n{"x":1}`, on), null);
+});
+
+test("TESLA_FLEET_AUDIT_FULL_VIN: on by default; 0/false/off = last 6; unrecognised = last 6 with a warning", () => {
+  assert.equal(loadConfig(baseEnv({})).auditFullVin, true);
+  assert.equal(loadConfig(baseEnv({ TESLA_FLEET_AUDIT_FULL_VIN: "${TESLA_FLEET_AUDIT_FULL_VIN}" })).auditFullVin, true, "unexpanded placeholder = unset");
+  for (const v of ["1", "true", "on"]) assert.equal(loadConfig(baseEnv({ TESLA_FLEET_AUDIT_FULL_VIN: v })).auditFullVin, true);
+  for (const v of ["0", "false", "off"]) assert.equal(loadConfig(baseEnv({ TESLA_FLEET_AUDIT_FULL_VIN: v })).auditFullVin, false);
+  const g = loadConfig(baseEnv({ TESLA_FLEET_AUDIT_FULL_VIN: "garbage" }));
+  assert.equal(g.auditFullVin, false);
+  assert.ok(g.warnings.some((w) => w.includes("TESLA_FLEET_AUDIT_FULL_VIN")));
 });
 
 // ---------- URL validation ----------
@@ -166,7 +180,7 @@ test("without confirm: dry-run preview (host + path hash only), zero network, au
   const a = auditLines(e);
   assert.equal(a.length, 1);
   assert.equal(a[0].event, "dry_run");
-  assert.equal(a[0].vin, VIN, "audit records the full VIN");
+  assert.equal(a[0].vin, "…MPLE", "not confirmed on the account yet (dry-run): last 4 only");
   assert.equal("vinLast6" in a[0], false);
   assertAuditHygiene(e);
 });
@@ -282,6 +296,7 @@ test("happy path: online + paired checks, 2 signed_command calls to the Fleet AP
   assert.equal(cmd.validTag, true);
   assert.equal(cmd.action!.toString("hex"), encodeVideoRequestAction(validateVideoUrl(URL_OK).url).toString("hex"), "full URL reaches the car");
   assert.deepEqual(auditLines(e).map((x) => [x.event, x.outcome ?? null]), [["attempt", null], ["result", "accepted"]]);
+  assert.ok(auditLines(e).every((x) => x.vin === VIN), "confirmed on the account (online check passed): full VIN");
   assertAuditHygiene(e);
   if (process.platform !== "win32") assert.equal(fs.statSync(e.TESLA_FLEET_AUDIT_LOG).mode & 0o077, 0, "audit log 0600");
 });
@@ -476,4 +491,53 @@ test("audit: keyed path hash with a per-install 0600 salt; pre-existing loose fi
   const b2 = body(await (await connect(s2.ctx)).callTool({ name: TOOL, arguments: { url: URL_OK } }));
   assert.notEqual((b2.video as { pathHash: string }).pathHash, h);
   assertAuditHygiene(e);
+});
+
+// ---------- audit VIN: unconfirmed caller-supplied VINs ----------
+
+const UNLISTED = "5YJ0000EXAMPLE009";
+
+test("unlisted VIN in a dry-run: audited as the last 4 only", async () => {
+  const e = env();
+  const { ctx, calls } = setup(e, vehicleRoutes());
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: TOOL, arguments: { url: URL_OK, vin: UNLISTED } }));
+  assert.equal(b.dryRun, true);
+  assert.equal(calls.length, 0);
+  assert.deepEqual(auditLines(e).map((x) => [x.event, x.vin]), [["dry_run", "…E009"]]);
+  assert.ok(!fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").includes(UNLISTED));
+});
+
+test("unlisted VIN with a bad URL: refusal audited with the last 4 only", async () => {
+  const e = env();
+  const { ctx } = setup(e, vehicleRoutes());
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: TOOL, arguments: { url: "http://192.0.2.10/x.mp4", vin: UNLISTED, ...intent } }));
+  assert.equal(b.code, "invalid_video_url");
+  assert.deepEqual(auditLines(e).map((x) => [x.event, x.vin]), [["refused", "…E009"]]);
+  assert.ok(!fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").includes(UNLISTED));
+});
+
+test("unlisted VIN that 404s on the online check: failure audited with the last 4 only, nothing sent", async () => {
+  const e = env();
+  const { ctx, calls } = setup(e, vehicleRoutes(fake(), {
+    [`GET ${BASE}/api/1/vehicles/${UNLISTED}`]: () => ({ status: 404, body: { error: "not_found", error_description: "vehicle not found" } }),
+  }));
+  const res = await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK, vin: UNLISTED, ...intent } });
+  assert.equal(isError(res), true);
+  assert.equal(calls.filter((x) => x.url.endsWith("/signed_command")).length, 0);
+  const a = auditLines(e);
+  assert.deepEqual(a.map((x) => [x.event, x.stage, x.vin]), [["failure", "pre_checks", "…E009"]]);
+  assert.ok(!fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").includes(UNLISTED));
+});
+
+test("TESLA_FLEET_AUDIT_FULL_VIN=0: a confirmed car is audited with the last 6", async () => {
+  const e = env({ TESLA_FLEET_AUDIT_FULL_VIN: "0" });
+  const { ctx } = setup(e, vehicleRoutes(fake()));
+  const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK, ...intent } }));
+  assert.equal(b.ok, true);
+  const a = auditLines(e);
+  assert.deepEqual(a.map((x) => x.event), ["attempt", "result"]);
+  assert.ok(a.every((x) => x.vin === "…XAMPLE"));
+  assert.ok(!fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").includes(VIN));
 });

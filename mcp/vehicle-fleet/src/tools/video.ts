@@ -10,7 +10,9 @@
  * explicitly off); confirm=true + user_request; hosts not on
  * TESLA_FLEET_VIDEO_HOST_ALLOWLIST also need allow_unlisted_host=true (an
  * unset allowlist means every host needs it); TESLA_FLEET_DRY_RUN honoured.
- * Every call is audited (src/audit.ts) without the full URL or VIN.
+ * Every call is audited (src/audit.ts): the full VIN only for a car confirmed
+ * on the account (TESLA_FLEET_AUDIT_FULL_VIN=0: last 6; unconfirmed: last 4),
+ * the URL host and a keyed path hash, never the full URL.
  */
 import fs from "node:fs";
 import { auditVin, type AuditEvent } from "../audit.js";
@@ -122,7 +124,9 @@ export const PLAY_VIDEO: ToolDef = {
   },
   handler: async (args: ToolArgs, ctx: ToolContext) => {
     const preVin = offlineVin(args, ctx);
-    const base: Record<string, unknown> = { vin: auditVin(preVin) };
+    // Not yet confirmed on the account: last 4 only.
+    const fullVin = ctx.config.auditFullVin;
+    const base: Record<string, unknown> = { vin: auditVin(preVin, { confirmed: false, fullVin }) };
 
     let video: VideoUrl;
     try {
@@ -204,8 +208,11 @@ export const PLAY_VIDEO: ToolDef = {
     let vin: string;
     try {
       vin = await ctx.fleet.resolveVin(args.vin);
-      base.vin = auditVin(vin);
+      // Picked from the account's vehicle list (no vin passed, no default): confirmed. Otherwise confirmed by the online check below.
+      const fromList = !(typeof args.vin === "string" && args.vin.trim()) && !ctx.config.defaultVin;
+      base.vin = auditVin(vin, { confirmed: fromList, fullVin });
       await ctx.fleet.requireOnline(vin);
+      base.vin = auditVin(vin, { confirmed: true, fullVin });
       const fsx = await ctx.fleet.fleetStatus(vin);
       if (fsx.paired === false) throw new LocalRefusal("virtual_key_missing", "This app's virtual key is not paired with the vehicle; nothing was sent.", pairingHint(ctx));
     } catch (e) {

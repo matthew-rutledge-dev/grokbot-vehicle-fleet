@@ -128,7 +128,7 @@ export const READ_TOOLS: ToolDef[] = [
         playVideoOnScreen: "EXPERIMENTAL command (hidden unless read-only is off): signed locally with the virtual key and sent via Fleet API signed_command; unverified on live vehicles.",
         commandKeyConfigured: Boolean(ctx.config.commandKeyFile),
         videoHostAllowlistEntries: ctx.config.videoHostAllowlist.length,
-        auditLog: "on (JSONL; full VIN, URL host + path hash only)",
+        auditLog: "on (JSONL; full VIN for confirmed account cars, URL host + keyed path hash only)",
       },
     }),
   },

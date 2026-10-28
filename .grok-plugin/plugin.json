@@ -190,7 +190,12 @@
       "TESLA_FLEET_AUDIT_LOG": {
         "type": "string",
         "title": "Audit log file",
-        "description": "Optional. JSONL audit log for experimental signed commands (VIN last 6, URL host + path hash only). Default: audit.jsonl next to the token store."
+        "description": "Optional. JSONL audit log for experimental signed commands (full VIN for confirmed account cars, URL host + keyed path hash only). Default: audit.jsonl next to the token store."
+      },
+      "TESLA_FLEET_AUDIT_FULL_VIN": {
+        "type": "string",
+        "title": "Full VIN in audit log",
+        "description": "Optional. Audit lines of experimental signed commands record the full VIN of a car confirmed on the account. On by default; 0/false/no/off keeps the last 6 (an unrecognised value also keeps the last 6, with a warning). Unconfirmed VINs are always cut to the last 4."
       }
     },
     "required": [

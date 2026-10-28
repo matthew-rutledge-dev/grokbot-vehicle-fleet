@@ -54,6 +54,7 @@ export const ENV = {
   COMMAND_KEY_FILE: "TESLA_FLEET_COMMAND_KEY_FILE",
   VIDEO_HOST_ALLOWLIST: "TESLA_FLEET_VIDEO_HOST_ALLOWLIST",
   AUDIT_LOG: "TESLA_FLEET_AUDIT_LOG",
+  AUDIT_FULL_VIN: "TESLA_FLEET_AUDIT_FULL_VIN",
 } as const;
 
 /** Defaults for the climate_warm_up preset (all overridable per call). */
@@ -98,6 +99,17 @@ function resolveNhtsa(env: Env, warnings: string[]): boolean {
   if (ON_VALUES.includes(l)) return false;
   if (OFF_VALUES.includes(l)) return true;
   warnings.push(`${ENV.DISABLE_NHTSA} has an unrecognised value; NHTSA recalls (get_recalls) are OFF. Use 1/true/on to disable or 0/false/off to keep them.`);
+  return false;
+}
+
+/** Full VIN in audit lines (for cars confirmed on the account): on by default; 0/false/no/off = last 6. Unrecognised = last 6 (masks). */
+function resolveAuditFullVin(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.AUDIT_FULL_VIN, env);
+  if (v === undefined) return true;
+  const l = v.toLowerCase();
+  if (ON_VALUES.includes(l)) return true;
+  if (OFF_VALUES.includes(l)) return false;
+  warnings.push(`${ENV.AUDIT_FULL_VIN} has an unrecognised value; audit lines keep the VIN's last 6. Use 1/true/on or 0/false/off.`);
   return false;
 }
 
@@ -184,6 +196,8 @@ export type Config = {
   videoHostAllowlist: string[];
   /** JSONL audit log for experimental signed commands (default: audit.jsonl next to the token store). */
   auditLogPath: string;
+  /** Audit lines record the full VIN of a car confirmed on the account (default true); false = last 6. */
+  auditFullVin: boolean;
   /** Config problems found at start (no secret values). */
   problems: string[];
   /** Non-fatal warnings for stderr (no secret values). */
@@ -327,6 +341,7 @@ export function loadConfig(env: Env = process.env): Config {
     commandKeyFile: readEnv(ENV.COMMAND_KEY_FILE, env),
     videoHostAllowlist,
     auditLogPath,
+    auditFullVin: resolveAuditFullVin(env, warnings),
     problems,
     warnings,
   });

@@ -47,7 +47,7 @@ Every call appends one or two JSON lines to `TESLA_FLEET_AUDIT_LOG` (default: `a
 | `result` | the car answered: `outcome` = `accepted` / `accepted_unverified` (plaintext reply) / `rejected` (`reason`) / `fault` (`fault`), plus `authenticatedResponse` |
 | `failure` | handshake failed (`stage: handshake`, `sent: false`), command request failed (`stage: command`, `sent` = `false`/`true`/`unknown`), or a pre-check error |
 
-Fields: `ts` (UTC), `tool`, `experimental`, `vin` (full VIN), `url.host`, `url.pathHash`, `hostAllowlisted`, `allowUnlistedHost`. Never the URL path or query, tokens or key material. The log is checked for writability before the two billable pre-check reads; if it (or the `attempt` line) cannot be written the command is **not sent** (`audit_log_unavailable`).
+Fields: `ts` (UTC), `tool`, `experimental`, `vin` (the full VIN once the car is confirmed on the account, from the vehicle list or the online check; `…` + last 4 before that; `…` + last 6 with `TESLA_FLEET_AUDIT_FULL_VIN=0`), `url.host`, `url.pathHash`, `hostAllowlisted`, `allowUnlistedHost`. Never the URL path or query, tokens or key material. The log is checked for writability before the two billable pre-check reads; if it (or the `attempt` line) cannot be written the command is **not sent** (`audit_log_unavailable`).
 
 ## What is verified and what is not
 

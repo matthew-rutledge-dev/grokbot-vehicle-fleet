@@ -89,7 +89,8 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
 | `TESLA_FLEET_COMMAND_KEY_FILE` | experimental only | Path to the virtual-key **private** key (PEM, P-256) used only by the EXPERIMENTAL `play_video_on_screen` to sign locally. Set it only on the host that already holds the key, `chmod 600` and owned by the server's user (otherwise refused); **never commit** |
 | `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` | no | Comma-separated hosts `play_video_on_screen` may send without a second approval (`video.example.com,*.cdn.example.com`; `*.` = subdomains only; `host:port` to allow a non-default port, which is otherwise always refused). Unset = every host needs `allow_unlisted_host=true` |
-| `TESLA_FLEET_AUDIT_LOG` | no | JSONL audit log for experimental signed commands (default `audit.jsonl` next to the token store, kept `0600` in a `0700` folder; full VIN, URL host + keyed path hash only; salt in `<log>.salt`) |
+| `TESLA_FLEET_AUDIT_LOG` | no | JSONL audit log for experimental signed commands (default `audit.jsonl` next to the token store, kept `0600` in a `0700` folder; full VIN for cars confirmed on the account, URL host + keyed path hash only; salt in `<log>.salt`) |
+| `TESLA_FLEET_AUDIT_FULL_VIN` | no | Audit lines record the **full VIN** of a car confirmed on the account (picked from the vehicle list or after the online check). **On by default**; `0`/`false`/`no`/`off` keeps the last 6 (an unrecognised value also keeps the last 6, with a warning). A VIN the caller passed that isn't confirmed yet (dry-runs, early refusals, failed checks) is always cut to the last 4. |
 
 **Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
@@ -233,7 +234,7 @@ No other endpoints, no telemetry, no analytics. The plugin does not push a telem
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
-- The experimental `play_video_on_screen` writes an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): the full VIN and the URL host plus a keyed path hash (per-install salt in `<log>.salt`, `0600`) only, never the full URL, query, tokens or keys.
+- The experimental `play_video_on_screen` writes an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): the full VIN of a car confirmed on the account (last 4 before that; `TESLA_FLEET_AUDIT_FULL_VIN=0` for the last 6) and the URL host plus a keyed path hash (per-install salt in `<log>.salt`, `0600`) only, never the full URL, query, tokens or keys.
 
 ## Event triggers and telemetry alerts (separate bridge)
 
