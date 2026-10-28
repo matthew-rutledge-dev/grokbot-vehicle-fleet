@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+Ownership reads. All read-only, no confirm, never wake the car; nothing is hidden or unlocked by them, and the read-only switch still fails closed.
+
+- `get_vehicle_status` (and snapshot section `status`): firmware version, a pending or in-progress software update (`status`, `version`, `download_perc`, `install_perc`, `expected_duration_sec`, `scheduled_time_ms`, plus `pending`), odometer in mi and km, service mode. From `vehicle_state`, cached by default. `get_vehicle_snapshot` now defaults to all five sections.
+- `get_tires` adds `recommendedPsi` and `psiBelowRecommended` per tire when the car reports a recommended cold pressure.
+- `get_recent_alerts` (`recent_alerts`), `get_release_notes` (`release_notes`; image links left out), `get_service_status` (`service_data`: service status, estimated completion, visit number) and `get_warranty` (`dx/warranty/details`: active, upcoming, expired). One billable data call each, cached in memory 5 min to 6 h, rate-limited like other data reads.
+- `get_recalls`: the Fleet API has no recalls endpoint, so this reads the public NHTSA recalls API by make, model and model year decoded from the VIN locally. Neither the VIN nor the token is sent to NHTSA, and the call is not counted as Fleet API usage. Covers the model year, not the exact car. An undecodable VIN is refused before any call unless `model` and `model_year` are passed.
+- `get_recalls` hardening: the `model` argument is checked in the handler against the five Tesla models (case-insensitive) and anything else, such as free text or a VIN, is refused with `invalid_arguments` before any network call. VIN decoding now requires a Tesla manufacturer code (`5YJ`, `7SA`, `7G2`, `LRW`, `XP7`, `SFZ`). A local NHTSA limiter (one request per 5 s, 20 per rolling hour, on top of the 6 h cache) refuses with `rate_limited_locally` and sends nothing.
+- New `TESLA_FLEET_DISABLE_NHTSA`: `1`/`true`/`yes`/`on` (or an unrecognised value, with a warning) hides and refuses `get_recalls`, so nothing is sent to NHTSA. `describe_boundary` shows `nhtsaRecallsEnabled`.
+- `get_tires`: `psiBelowRecommended` is clamped at 0 (a tire at or above the recommended pressure reads 0, never negative).
+- `get_service_status`: `otherKeys` lists up to 20 names of other fields Tesla returned (names only, never values); documented.
+- HTTP: `Content-Type` is sent only with a request body (bodiless GETs, including NHTSA, no longer send it).
+- Docs: `docs/TELEMETRY-FIELDS.md` lists the Fleet Telemetry fields and intervals the separate event bridge needs for ownership events, what Tesla does not expose, the `alert_types` caveat and an example `fleet_telemetry_config` body (placeholders; reference only, not pushed). README endpoint table adds NHTSA.
+- Tool counts: 22 read-only, 48 with commands on (one fewer each with location off, and one fewer each with NHTSA disabled).
+
 ## 0.3.3 (unreleased)
 
 - New, opt-in and **off by default**: `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE`. When set to an absolute path, the MCP server (not the auth helper) refreshes once at startup and then about 10 minutes before each access-token expiry, and writes the raw token string there each time (no newline, no JSON, never the refresh token), atomically (temp `0600` + fsync + rename), with a missing parent directory created `0700`. The keep-fresh loop shares the server's single-flight refresh, store lock and auth rate limit, backs off 1/5/15 min on failure, stops on `login_required` (file left as is), and its timer is unref'd. The file stays fresh only while the server runs; after it stops the token expires within about 8 h.

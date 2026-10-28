@@ -34,6 +34,7 @@ export const ENV = {
   ACCESS_TOKEN_EXPORT_FILE: "TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE",
   READ_ONLY: READ_ONLY_ENV,
   ENABLE_LOCATION: "TESLA_FLEET_ENABLE_LOCATION",
+  DISABLE_NHTSA: "TESLA_FLEET_DISABLE_NHTSA",
   LOCATION_PRECISION: "TESLA_FLEET_DEFAULT_LOCATION_PRECISION",
   DEFAULT_VIN: "TESLA_DEFAULT_VIN",
   DEFAULT_ENERGY_SITE: "TESLA_DEFAULT_ENERGY_SITE_ID",
@@ -82,6 +83,17 @@ function resolveLocation(env: Env, warnings: string[]): boolean {
   if (ON_VALUES.includes(l)) return true;
   if (OFF_VALUES.includes(l)) return false;
   warnings.push(`${ENV.ENABLE_LOCATION} has an unrecognised value; location is OFF. Use 1/true/on or 0/false/off.`);
+  return false;
+}
+
+/** NHTSA is on by default; 1/true/yes/on disables it. An unrecognised value disables it too (fails closed). */
+function resolveNhtsa(env: Env, warnings: string[]): boolean {
+  const v = readEnv(ENV.DISABLE_NHTSA, env);
+  if (v === undefined) return true;
+  const l = v.toLowerCase();
+  if (ON_VALUES.includes(l)) return false;
+  if (OFF_VALUES.includes(l)) return true;
+  warnings.push(`${ENV.DISABLE_NHTSA} has an unrecognised value; NHTSA recalls (get_recalls) are OFF. Use 1/true/on to disable or 0/false/off to keep them.`);
   return false;
 }
 
@@ -146,6 +158,8 @@ export type Config = {
   readOnly: ReadOnlyResolution;
   /** get_location listed: on unless TESLA_FLEET_ENABLE_LOCATION is off (or unrecognised). */
   locationEnabled: boolean;
+  /** get_recalls (public NHTSA API) listed: on unless TESLA_FLEET_DISABLE_NHTSA is on (or unrecognised). */
+  nhtsaEnabled: boolean;
   /** get_location precision when the call does not pass one (default coarse). */
   locationPrecision: "coarse" | "precise";
   defaultVin?: string;
@@ -287,6 +301,7 @@ export function loadConfig(env: Env = process.env): Config {
     readOnly,
     locationEnabled: resolveLocation(env, warnings),
     locationPrecision: resolveLocationPrecision(env, warnings),
+    nhtsaEnabled: resolveNhtsa(env, warnings),
     defaultVin: readEnv(ENV.DEFAULT_VIN, env),
     defaultEnergySiteId: readEnv(ENV.DEFAULT_ENERGY_SITE, env),
     dryRun: resolveDryRun(env, warnings),

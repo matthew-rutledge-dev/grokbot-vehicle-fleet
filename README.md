@@ -71,6 +71,7 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE` | no | **Opt-in, off by default.** Absolute path that the running server keeps refreshed with the current access token, for trusted local consumers. The token carries **all** granted scopes - read [Access-token export](#access-token-export-opt-in) first |
 | `TESLA_FLEET_READ_ONLY` | no | **Fails closed** - see below |
 | `TESLA_FLEET_ENABLE_LOCATION` | no | Location is **on by default**. `0`/`false`/`no`/`off` hides and refuses `get_location`. Any other value = **off**, one warning on stderr (see below) |
+| `TESLA_FLEET_DISABLE_NHTSA` | no | NHTSA recalls are **on by default**. `1`/`true`/`yes`/`on` hides and refuses `get_recalls`, so nothing is ever sent to the public NHTSA API. Any other unrecognised value = **off** too, one warning on stderr. Unset or `0`/`false`/`no`/`off` = on |
 | `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` | no | `coarse` (default) or `precise`: `get_location` precision when the call does not pass one |
 | `TESLA_DEFAULT_VIN` | no | Default VIN for reads (e.g. `5YJ000000EXAMPLE`) |
 | `TESLA_DEFAULT_ENERGY_SITE_ID` | no | Default energy site for energy reads and commands (e.g. `1234567890`); otherwise the only site on the account |
@@ -116,11 +117,15 @@ The server runs for one owner and their own car, so `get_location` is listed by 
 
 ## Tools
 
-Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_snapshot`, and `get_location` (on by default; coarse unless `precision=precise`).
+Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_status`, `get_vehicle_snapshot`, and `get_location` (on by default; coarse unless `precision=precise`).
 
 Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
 
-Tool counts: **16** in the default read-only mode (12 vehicle reads including `get_location` + 4 energy reads), **42** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands); one fewer each with location turned off.
+Ownership reads (no confirm; never wake the vehicle): `get_recent_alerts` (recent vehicle alerts), `get_release_notes` (firmware release notes; images left out), `get_service_status` (service center status, estimated completion and visit number from `service_data`; `otherKeys` lists up to 20 names of any other fields Tesla returned, names only and never their values, so new fields are visible without being passed through), `get_warranty` (active, upcoming and expired coverage from `dx/warranty/details`) and `get_recalls` (see below). `get_vehicle_status` (also a `get_vehicle_snapshot` section, `status`) shows the firmware version, a pending or in-progress software update (version, download and install %), the odometer (mi and km) and service mode; `get_tires` adds psi below the recommended cold pressure when the car reports it.
+
+`get_recalls`: the Fleet API has no recalls endpoint, so this reads the public NHTSA recalls API by make, model and model year, which are decoded from the VIN on your machine. **Neither the VIN nor the token is sent to NHTSA**, and the call is not Fleet API usage. Results cover the model year, not the exact car; the Tesla app shows whether a recall applies to and is done on a specific car. The optional `model` argument accepts only `Model S`, `Model 3`, `Model X`, `Model Y` or `Cybertruck` (case-insensitive); anything else is refused with `invalid_arguments` before any call, and a VIN whose first three characters are not a Tesla manufacturer code is not decoded. NHTSA calls are also limited locally (at most one every 5 s and 20 per rolling hour, on top of the 6 h cache); over the limit, `rate_limited_locally` is returned and nothing is sent. To turn NHTSA off entirely, set `TESLA_FLEET_DISABLE_NHTSA=1`.
+
+Tool counts: **22** in the default read-only mode (18 vehicle reads including `get_location` + 4 energy reads), **48** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands); one fewer each with location turned off, and one fewer each with `TESLA_FLEET_DISABLE_NHTSA` on.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -161,7 +166,7 @@ Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AU
 
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
-Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, media, software updates, off-grid vehicle charging reserve.
+Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, media, software update commands (scheduling or cancelling an install; reading update status is supported), off-grid vehicle charging reserve.
 
 ## Usage counter (local estimate)
 
@@ -210,12 +215,13 @@ Use it only for **trusted local consumers on the same host** (for example a read
 | `https://auth.tesla.com/oauth2/v3/authorize` | opened by you in a browser via auth-helper |
 | `https://fleet-api.prd.na.vn.cloud.tesla.com`, `https://fleet-api.prd.eu.vn.cloud.tesla.com`, `https://fleet-api.prd.cn.vn.cloud.tesla.cn` | Fleet API reads, wake, fleet_status, region lookup |
 | your `TESLA_COMMAND_PROXY_URL` | signed commands |
+| `https://api.nhtsa.gov/recalls/recallsByVehicle` | `get_recalls` only: make, model and model year (no VIN, no token); never when `TESLA_FLEET_DISABLE_NHTSA` is on |
 
-No other endpoints, no telemetry, no analytics.
+No other endpoints, no telemetry, no analytics. The plugin does not push a telemetry configuration; [docs/TELEMETRY-FIELDS.md](docs/TELEMETRY-FIELDS.md) lists the fields an operator may add for ownership events.
 
 ## Privacy
 
-- The plugin stores **no vehicle data**. Reads are cached in memory for up to 60 s and discarded when the server exits. The only files it writes are the token store, the usage counter (`usage.json`, totals only) and, only if you opt in, the access-token export file.
+- The plugin stores **no vehicle data**. Reads are cached in memory (vehicle state up to 60 s; alerts 5 min, service status 10 min, release notes 1 h, warranty and recalls 6 h) and discarded when the server exits. The only files it writes are the token store, the usage counter (`usage.json`, totals only) and, only if you opt in, the access-token export file.
 - Location is on by default (opt out with `TESLA_FLEET_ENABLE_LOCATION=0`), coarse unless precise is asked for, never written to disk. The vehicle shows a location-sharing indicator when location is read.
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
@@ -225,7 +231,7 @@ No other endpoints, no telemetry, no analytics.
 
 This plugin is the **request and command path**: an agent asks, the plugin reads (cached first) or, when commands are on, sends one confirm-gated command. It does not watch the car, receive telemetry or push alerts.
 
-Event triggers (charge complete, plugged in or unplugged, door or trunk open while parked, Sentry alerts, low battery, software update available) and energy-site alerts (grid outage, battery near the backup reserve, storm watch) live in an event bridge with a Tesla source adapter. The bridge is a **separate, self-hosted project, not part of this repository**; you install and run it yourself, and this plugin neither ships nor starts it. That bridge:
+Event triggers (charge complete, plugged in or unplugged, door or trunk open while parked, Sentry alerts, low battery, software update available), ownership events (software updates, odometer milestones, vehicle alerts, service, tires, battery, charging faults, safety, Sentry, recalls; immediate or in a weekly digest) and energy-site alerts (grid outage, battery near the backup reserve, storm watch) live in an event bridge with a Tesla source adapter. The bridge is a **separate, self-hosted project, not part of this repository**; you install and run it yourself, and this plugin neither ships nor starts it. That bridge:
 
 - receives Fleet Telemetry records from Tesla's own `fleet-telemetry` server (which you host behind a public mTLS endpoint) and polls energy-site `live_status` read-only;
 - wakes an agent with a short prompt carrying a masked VIN or site id;

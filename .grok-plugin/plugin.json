@@ -1,6 +1,6 @@
 {
   "name": "grokbot-vehicle-fleet",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "Vehicle and energy-site (Powerwall/solar) status + confirm-gated vehicle and energy-site commands via the official Fleet API, with your own developer app, tokens and command proxy. One vehicle-fleet MCP server (read-only unless TESLA_FLEET_READ_ONLY is explicitly off; cached-first reads; never auto-wakes) + skills.",
   "author": {
     "name": "Matthew Rutledge",
@@ -96,6 +96,11 @@
         "type": "string",
         "title": "Enable location",
         "description": "Optional opt-out. Location is on by default (coarse). 0/false/no/off hides get_location; an unrecognised value also turns it off (with a warning)."
+      },
+      "TESLA_FLEET_DISABLE_NHTSA": {
+        "type": "string",
+        "title": "Disable NHTSA recalls",
+        "description": "Optional. get_recalls reads the public NHTSA recalls API by make, model and model year (no VIN, no token). 1/true/yes/on hides and refuses get_recalls so nothing is ever sent to NHTSA; an unrecognised value also turns it off (with a warning). Unset or 0/false/no/off = on."
       },
       "TESLA_FLEET_DEFAULT_LOCATION_PRECISION": {
         "type": "string",

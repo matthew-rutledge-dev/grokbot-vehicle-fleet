@@ -10,7 +10,7 @@ import { TtlCache } from "./cache.js";
 import { REGION_BASE_URLS, type Config } from "./config.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
 import { unwrap, type Http } from "./http.js";
-import type { RateLimiter } from "./ratelimit.js";
+import { NhtsaLimiter, type RateLimiter } from "./ratelimit.js";
 import type { UsageCategory } from "./usage.js";
 
 export type VehicleSummary = {
@@ -33,6 +33,14 @@ export const CACHED_TTL_MS = 60_000;
 export const FLEET_STATUS_TTL_MS = 10 * 60_000;
 /** Vehicle list reused for VIN resolution (the set of cars rarely changes). */
 export const VEHICLE_LIST_TTL_MS = 5 * 60_000;
+/** Ownership reads: slow-changing, so cached longer. */
+export const RECENT_ALERTS_TTL_MS = 5 * 60_000;
+export const SERVICE_TTL_MS = 10 * 60_000;
+export const RELEASE_NOTES_TTL_MS = 60 * 60_000;
+export const WARRANTY_TTL_MS = 6 * 60 * 60_000;
+export const RECALLS_TTL_MS = 6 * 60 * 60_000;
+/** Public NHTSA recalls API (no token, no VIN: queried by make / model / model year). */
+export const NHTSA_BASE_URL = "https://api.nhtsa.gov";
 export const ENERGY_LIVE_TTL_MS = 60_000;
 export const ENERGY_INFO_TTL_MS = 10 * 60_000;
 export const ENERGY_HISTORY_TTL_MS = 5 * 60_000;
@@ -51,6 +59,8 @@ export type FleetClientOptions = {
   sleep?: (ms: number) => Promise<void>;
   wakePollMs?: number;
   wakeTimeoutMs?: number;
+  /** Local NHTSA limiter (injectable for tests). */
+  nhtsaLimiter?: NhtsaLimiter;
 };
 
 export class FleetClient {
@@ -61,6 +71,7 @@ export class FleetClient {
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly wakePollMs: number;
   private readonly wakeTimeoutMs: number;
+  private readonly nhtsaLimiter: NhtsaLimiter;
 
   constructor(
     private readonly config: Config,
@@ -73,6 +84,7 @@ export class FleetClient {
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.wakePollMs = opts.wakePollMs ?? 5_000;
     this.wakeTimeoutMs = opts.wakeTimeoutMs ?? 60_000;
+    this.nhtsaLimiter = opts.nhtsaLimiter ?? new NhtsaLimiter();
   }
 
   get billableCalls(): number {
@@ -227,6 +239,54 @@ export class FleetClient {
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
+  }
+
+  // ---- Ownership reads (read-only; never wake the vehicle). ----
+
+  private async vehicleGet(key: string, ttl: number, vin: string, path: string): Promise<{ data: unknown; ageSec: number }> {
+    const hit = this.cache.get<unknown>(key, ttl);
+    if (hit) return { data: hit.value, ageSec: hit.ageSec };
+    this.limiter.take("data", vin);
+    const base = await this.resolveBaseUrl();
+    const res = await this.call("data", "GET", `${base}${path}`);
+    const data = unwrap<unknown>(res.body) ?? {};
+    this.cache.set(key, data);
+    return { data, ageSec: 0 };
+  }
+
+  /** GET /api/1/vehicles/{vin}/recent_alerts (cached 5 min). */
+  recentAlerts(vin: string) {
+    return this.vehicleGet(`alerts:${vin}`, RECENT_ALERTS_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/recent_alerts`);
+  }
+
+  /** GET /api/1/vehicles/{vin}/release_notes (cached 1 h). */
+  releaseNotes(vin: string) {
+    return this.vehicleGet(`release_notes:${vin}`, RELEASE_NOTES_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/release_notes`);
+  }
+
+  /** GET /api/1/vehicles/{vin}/service_data (cached 10 min). */
+  serviceData(vin: string) {
+    return this.vehicleGet(`service:${vin}`, SERVICE_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/service_data`);
+  }
+
+  /** GET /api/1/dx/warranty/details?vin= (cached 6 h). */
+  warrantyDetails(vin: string) {
+    return this.vehicleGet(`warranty:${vin}`, WARRANTY_TTL_MS, vin, `/api/1/dx/warranty/details?vin=${encodeURIComponent(vin)}`);
+  }
+
+  /**
+   * NHTSA recalls for a make / model / model year (cached 6 h). Public API: no token is sent, the
+   * VIN is not sent, and the call is not Fleet API usage. Fleet API has no recalls endpoint.
+   */
+  async nhtsaRecalls(model: string, modelYear: number): Promise<{ data: unknown; ageSec: number }> {
+    const q = new URLSearchParams({ make: "TESLA", model: model.toUpperCase(), modelYear: String(modelYear) }).toString();
+    const key = `recalls:${q}`;
+    const hit = this.cache.get<unknown>(key, RECALLS_TTL_MS);
+    if (hit) return { data: hit.value, ageSec: hit.ageSec };
+    this.nhtsaLimiter.take(); // throws LocalRefusal before any request
+    const res = await this.http.request({ method: "GET", url: `${NHTSA_BASE_URL}/recalls/recallsByVehicle?${q}`, external: true, timeoutMs: 15_000 }, "other");
+    this.cache.set(key, res.body);
+    return { data: res.body, ageSec: 0 };
   }
 
   // ---- Energy sites (Powerwall / solar / Wall Connector via site live_status). Read-only. ----
