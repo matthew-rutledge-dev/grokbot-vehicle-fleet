@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1 (unreleased)
+
+Field results for `play_video_on_screen` and small fixes.
+
+- `play_video_on_screen` gets the MCP title "Open URL on car screen (experimental)"; the tool name is unchanged. Its description now says what the car was seen to do: video sites open in the player without auto-play, other https pages open in the car's web browser, the first send tends to come to the front while later ones may load silently, some sites are accepted but never shown, and local http/IP addresses are refused by design.
+- Docs: `docs/EXPERIMENTAL-SIGNED-COMMANDS.md` adds generic field results (firmware 2026.38.x: action 57 accepted, a video site and a general web page opened, a home-automation remote URL accepted but not shown; action 47 dashcam save confirmed by a manual-save entry) and narrows the "not verified" list.
+- Windows: previews add a non-fatal `commandKeyWarning` when `icacls` shows Everyone, Users or Authenticated Users (or their SIDs) with read, write or full rights on `TESLA_FLEET_COMMAND_KEY_FILE`. POSIX checks are unchanged (still enforced).
+- VIN placeholder in docs, schema and tests is now 17 characters (`5YJ0000000EXAMPLE`).
+- Dependencies: `@types/node` 26.6.6.
+
 ## 0.5.0 (unreleased)
 
 Experimental `play_video_on_screen`.

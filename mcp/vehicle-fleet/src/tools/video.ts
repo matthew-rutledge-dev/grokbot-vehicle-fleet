@@ -1,6 +1,6 @@
 /**
- * EXPERIMENTAL: play_video_on_screen. Asks the vehicle to open a video URL on
- * its center screen via CarServer VehicleAction.videoRequestAction (57), a
+ * EXPERIMENTAL: play_video_on_screen ("Open URL on car screen"). Asks the vehicle
+ * to open a URL on its center screen via CarServer VehicleAction.videoRequestAction (57), a
  * community-documented action that is not in Tesla's published protos and that
  * stock tesla-http-proxy has no endpoint for. Sent with the local
  * signed_command helper (src/signed), so it needs the virtual-key private key
@@ -25,6 +25,7 @@ import type { ToolArgs, ToolContext } from "../context.js";
 import { classifySendFailure, offlineVin, pairingHint, requireIntent, scopeHint } from "./commands.js";
 import { CONFIRM_PROPS, VIN_PROP } from "./schema.js";
 import type { ToolDef } from "./types.js";
+import { windowsKeyAclWarning } from "./keyacl.js";
 import { hostAllowed, MAX_VIDEO_URL_LENGTH, validateVideoUrl, type VideoUrl } from "./videourl.js";
 
 export const PLAY_VIDEO_TOOL = "play_video_on_screen";
@@ -39,7 +40,8 @@ const POSIX = process.platform !== "win32" && typeof process.getuid === "functio
 
 /**
  * Metadata-only check of the key file (never reads it). POSIX: must be a regular file owned by
- * this user with no group/other permission bits (chmod 600). Windows: existence only.
+ * this user with no group/other permission bits (chmod 600). Windows: existence only here;
+ * keyAclWarning adds a non-fatal icacls warning for broad groups (src/tools/keyacl.ts).
  */
 export function statKey(file: string | undefined): KeyStatus {
   if (!file) return "not_configured";
@@ -55,6 +57,13 @@ export function statKey(file: string | undefined): KeyStatus {
     if (st.mode & 0o077) return "insecure_permissions";
   }
   return "present";
+}
+
+/** Non-fatal Windows ACL warning, only for a key file that is present. */
+function keyAclWarning(file: string | undefined, st: KeyStatus): { commandKeyWarning?: string } {
+  if (st !== "present" && st !== "ok") return {};
+  const w = windowsKeyAclWarning(file);
+  return w ? { commandKeyWarning: w } : {};
 }
 
 /** statKey, then read + parse (send paths only). */
@@ -107,12 +116,13 @@ export const PLAY_VIDEO: ToolDef = {
   kind: "command",
   tool: {
     name: PLAY_VIDEO_TOOL,
-    description: "EXPERIMENTAL: ask the vehicle to open a video URL on its center screen (CarServer videoRequestAction, community-documented, unverified on live vehicles; it may be rejected by Fleet API or the car, or do nothing). https only, public host names only (no IPs, localhost or private names, no credentials), max " + MAX_VIDEO_URL_LENGTH + " characters. Hosts not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST also need allow_unlisted_host=true after the user explicitly approves that host (unset allowlist = every host). Signed locally with the virtual key (TESLA_FLEET_COMMAND_KEY_FILE) and sent via Fleet API signed_command, not the proxy: 2 billed command requests (handshake + command). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes). Every call is audit-logged (host and a keyed path hash only). Non-default ports only when the allowlist entry names the port. The key file must be chmod 600 and owned by the server's user.",
+    title: "Open URL on car screen (experimental)",
+    description: "EXPERIMENTAL: ask the vehicle to open an https URL on its center screen (CarServer videoRequestAction, community-documented). Field-tested on one car: video sites open in the car's video player but do not auto-play (the user taps play); other https pages open in the car's web browser. The first send in a drive tends to bring the player or browser to the front; later sends may load silently in the browser without coming forward. Some sites may be accepted by the car but never shown. The car accepting the command does not prove anything appeared: ask the user what the screen shows. https only, public host names only (local http addresses, IPs, localhost or private names and credentials are refused by design), max " + MAX_VIDEO_URL_LENGTH + " characters. Hosts not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST also need allow_unlisted_host=true after the user explicitly approves that host (unset allowlist = every host). Signed locally with the virtual key (TESLA_FLEET_COMMAND_KEY_FILE) and sent via Fleet API signed_command, not the proxy: 2 billed command requests (handshake + command). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes). Every call is audit-logged (host and a keyed path hash only). Non-default ports only when the allowlist entry names the port. The key file must be chmod 600 and owned by the server's user (POSIX); on Windows a broad-group ACL only produces a warning.",
     inputSchema: {
       type: "object",
       properties: {
         ...VIN_PROP,
-        url: { type: "string", description: "https URL of the video. Sent to the vehicle as is; never logged or echoed (host + path hash only)." },
+        url: { type: "string", description: "https URL to open (a video page or any public web page). Sent to the vehicle as is; never logged or echoed (host + path hash only)." },
         allow_unlisted_host: {
           type: "boolean",
           description: "Second, separate approval: true only when the user explicitly approved sending a host that is not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST. Ignored without confirm=true.",
@@ -149,13 +159,15 @@ export const PLAY_VIDEO: ToolDef = {
     const actionInfo = { vehicleAction: VEHICLE_ACTION.VIDEO_REQUEST, name: "videoRequestAction", payloadBytes: action.length };
 
     if (args.confirm !== true) {
+      const keySt = statKey(ctx.config.commandKeyFile);
       await audit(ctx, { ...base, event: "dry_run", mode: "no_confirm" });
       return {
         dryRun: true, sent: false, command: PLAY_VIDEO_TOOL, experimental: true, transport: TRANSPORT,
         action: actionInfo, video: urlInfo(video, pathHash), hostAllowlisted: listed,
         ...(listed ? {} : { needsAllowUnlistedHost: true }),
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
-        commandKey: KEY_TEXT[statKey(ctx.config.commandKeyFile)],
+        commandKey: KEY_TEXT[keySt],
+        ...keyAclWarning(ctx.config.commandKeyFile, keySt),
         wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
         estimatedBillableCalls: "2 commands (session handshake + videoRequestAction) after the 2 checks",
         toSend: listed
@@ -188,6 +200,7 @@ export const PLAY_VIDEO: ToolDef = {
         ],
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
         commandKey: KEY_TEXT[keyed.status],
+        ...keyAclWarning(ctx.config.commandKeyFile, keyed.status),
         note: "Validated only; no network call was made.",
       };
     }

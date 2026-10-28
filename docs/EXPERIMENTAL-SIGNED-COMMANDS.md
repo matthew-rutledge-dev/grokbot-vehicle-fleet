@@ -1,10 +1,18 @@
-# Experimental: locally signed commands (`play_video_on_screen`)
+# Experimental: locally signed commands (`play_video_on_screen`, "Open URL on car screen")
 
-> **EXPERIMENTAL and unverified on live vehicles.** The action used here is not in Tesla's published protocol definitions. It may be refused by Fleet API or by the car, or do nothing, and it may stop working with any firmware update.
+> **EXPERIMENTAL.** The action used here is not in Tesla's published protocol definitions. It has been field-tested on one car (see [Field results](#field-results)), but it may be refused by Fleet API or by the car, or do nothing, and it may stop working with any firmware update.
 
 ## What it does
 
-`play_video_on_screen` asks the vehicle to open a video URL on its center screen. It uses CarServer `VehicleAction.videoRequestAction` (field **57**, `VideoRequestAction { string url = 1; }`). That action is community-documented (it appears, marked as an extension, in `Teslemetry/tesla-protocol`); it is **not** in `teslamotors/vehicle-command`'s `car_server.proto`.
+`play_video_on_screen` (title: "Open URL on car screen") asks the vehicle to open an https URL on its center screen. The tool name is unchanged for compatibility. It uses CarServer `VehicleAction.videoRequestAction` (field **57**, `VideoRequestAction { string url = 1; }`). That action is community-documented (it appears, marked as an extension, in `Teslemetry/tesla-protocol`); it is **not** in `teslamotors/vehicle-command`'s `car_server.proto`.
+
+What the car does with the URL (observed, not documented by Tesla):
+
+- **Video sites** open in the car's video player. Playback does **not** start on its own; the person in the car taps play. There is no separate play signal in this action.
+- **Other https pages** open in the car's web browser, so the action works as a general "open this page" command, not only for video.
+- **Foreground:** the first send in a drive tends to bring the player or browser to the front. Later sends may load silently in the browser without coming forward (the page is there when the user opens the browser).
+- **Accepted but not shown:** some sites may be accepted by the car (authenticated OK) and still never appear. Acceptance never proves anything was shown; always ask the user what the screen shows.
+- **Local addresses:** `http://` URLs, IP addresses (for example a home server on the LAN) and private names are refused by this tool before anything is sent, by design. Use a public https name instead.
 
 ## Why not the proxy
 
@@ -24,6 +32,12 @@ There is no automatic retry and no session cache: every call does a fresh handsh
 ## Where it runs (the key)
 
 Signing needs the virtual key's **private** key: the same key your command proxy uses and that is paired with the car. Set `TESLA_FLEET_COMMAND_KEY_FILE` to its path **only on the host that already holds that key**, and run this MCP server there. Do not copy the key to another machine, and never commit it. The file is read at send time, never logged or returned. It must be a P-256 EC private key in PEM form (SEC1 `EC PRIVATE KEY` or PKCS#8). On POSIX it must be owned by the user running the server and have no group/other permission bits: `chmod 600 /path/to/key.pem`. Otherwise the call is refused with `command_key_insecure_permissions` before anything is read or sent.
+
+On **Windows** there are no mode bits, so the file is only checked to exist. In addition, previews run the built-in `icacls <file>` (metadata only; the key is not read) and add a **non-fatal** `commandKeyWarning` when a broad group (`Everyone`, `BUILTIN\Users`, `NT AUTHORITY\Authenticated Users`, or their well-known SIDs) has an allow entry with read, write or full rights. It is a warning, not a refusal; English principal names and the SIDs are matched, and if `icacls` cannot run there is no warning. Restrict the file to your own account, for example:
+
+```powershell
+icacls C:\path\to\key.pem /inheritance:r /grant:r "%USERNAME%:R"
+```
 
 ## Safety gates
 
@@ -57,12 +71,26 @@ Verified offline (unit tests, `test/signed.test.ts`):
 - The HMAC-personalized tag, request hash, the full `RoutableMessage` bytes for a `videoRequestAction`, the session-info request bytes, and decryption of vehicle-encrypted acks, all byte for byte against values produced by vehicle-command's own Go implementation (`internal/authentication`) with the same debug keys and a placeholder VIN.
 - An end-to-end run against an in-process fake vehicle (handshake, counter, expiry, encrypted ack, tampering, faults).
 
-**Not verified until a live test with the owner's yes:**
+## Field results
 
-- Whether Fleet API's `signed_command` accepts an HMAC-authenticated action it may not recognise (it inspects plaintext HMAC commands to enforce OAuth scopes and may reject unknown ones).
-- Whether current firmware still implements field 57, whether the car plays the URL (formats, hosts, and while parked only), and what it answers.
+One owner-approved live session on one car, firmware **2026.38.x**, each send approved individually and never retried:
+
+| Action | Result |
+|---|---|
+| 57 `videoRequestAction`, a video-site URL | Fleet API `signed_command` accepted it; authenticated OK from the car. The video opened in the player and did **not** auto-play. |
+| 57, a general web page | Authenticated OK; the page opened in the car's web browser. A second send later in the same drive loaded in the browser without coming to the front. |
+| 57, a home-automation remote-access URL (public https) | Authenticated OK each time, but nothing was shown on the screen. Not explained yet (possibly loaded in the background, or skipped by the car). |
+| 57, a local `http://` LAN address | Refused locally (`url must use https`); nothing sent. |
+| 47 `dashcamSaveClipAction` | Authenticated OK; confirmed in the car by a new manual-save entry in the dashcam's saved clips at the time of the send. |
+
+So Fleet API does accept these HMAC-authenticated infotainment actions, and current firmware implements fields 57 and 47.
+
+**Still not verified:**
+
+- Which sites the car declines to show, and exactly when the browser comes to the front.
+- Behaviour while driving (all tests were parked), other firmware versions and other models.
 - The exact acceptable expiry window over Fleet API latency (15 s chosen; vehicle-command uses 5 s).
 
 ## Reuse
 
-The helper (`SignedCommandClient.sendInfotainmentAction(vin, actionBytes)`) is action-agnostic; `encodeDashcamSaveClipAction()` (field 47) is included for the same experimental use and is not wired to any tool here.
+The helper (`SignedCommandClient.sendInfotainmentAction(vin, actionBytes)`) is action-agnostic; `encodeDashcamSaveClipAction()` (field 47) is included for the same experimental use and is not wired to any tool here (it was field-tested with the same helper; see above).
