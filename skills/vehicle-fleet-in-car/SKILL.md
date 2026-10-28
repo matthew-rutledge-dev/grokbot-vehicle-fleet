@@ -9,7 +9,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 
 ## Quick map
 
-- Page or video on the screen: `play_video_on_screen` (EXPERIMENTAL). `https` public hosts only; unlisted hosts need a named approval and `allow_unlisted_host=true`. It opens the link but does not press play; video needs Park. After `ok: true`, ask what the screen shows; if nothing, ask them to open the browser (later links can load in the background).
+- Page or video on the screen: `play_video_on_screen` (EXPERIMENTAL). `https` public hosts only; unlisted hosts need a named approval and `allow_unlisted_host=true`. It opens the link but does not press play; video needs Park. After `ok: true`, ask what the screen shows; if nothing, ask them to open the browser (hint from one field test, not guaranteed: later links can load in the background without coming to the front). Never send a URL that carries a token or other secret.
 - Navigation: `share_navigation` (destination text or lat+lon). Not for web links.
 - Climate: `climate_warm_up`, `climate_start` / `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`.
 - Security: `door_lock`, `door_unlock` (explicit vin), `actuate_trunk` (explicit vin; frunk usually cannot close remotely), `set_sentry_mode`, `flash_lights`, `honk_horn`.
@@ -19,7 +19,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 
 ## Not supported here (say so, do not improvise)
 
-Garage / HomeLink (Fleet API `trigger_homelink` needs the car's lat/lon; no tool yet), windows, dashcam save, screen notifications or pop-ups, media controls, remote start, valet, speed limit, guest mode, software updates. Never reach for raw endpoints, scripts or another agent instead.
+Garage / HomeLink (Fleet API `trigger_homelink` needs the car's lat/lon; no tool yet; a Home Assistant tool only if it is already available and the person asks for it), windows, dashcam save, screen notifications or pop-ups, media controls, remote start, valet, speed limit, guest mode, software updates. Never reach for raw endpoints, scripts or another agent instead.
 
 ## Never
 
