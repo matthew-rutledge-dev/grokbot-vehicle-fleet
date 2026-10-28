@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased: experimental `play_video_on_screen`
+
+Version number left as is on purpose; this lands after 0.4.0 and takes the next version then.
+
+- New EXPERIMENTAL command `play_video_on_screen` (hidden unless read-only is off): asks the car to open a video URL on its screen via CarServer `videoRequestAction` (field 57, community-documented, unverified on live vehicles). Dry-run without `confirm`; `confirm=true` needs `user_request`; honours `TESLA_FLEET_DRY_RUN`; vehicle must be online (no auto-wake) and the key paired; never retried.
+- URL checks before anything else: `https` only, no credentials, no IP literals, no `localhost` / single-label / private or special-use names, no whitespace, max 2048 characters. New `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` (exact hosts or `*.domain`); any other host, or every host when the list is unset, also needs `allow_unlisted_host=true`.
+- New self-contained signed_command helper (`src/signed/`): Vehicle Command Protocol handshake (session info HMAC-verified), HMAC-SHA256 personalized command authentication, AES-GCM ack decryption, sent to Fleet API `/api/1/vehicles/{vin}/signed_command` (not the proxy, which cannot encode this action). Needs the virtual-key private key on the same host: new `TESLA_FLEET_COMMAND_KEY_FILE`. Checked against `vehicle-command`'s protocol.md examples and byte for byte against its Go implementation. 2 billed command requests per call.
+- New audit log for experimental signed commands, `TESLA_FLEET_AUDIT_LOG` (default `audit.jsonl` next to the token store, `0600`): refused / dry_run / attempt / result / failure, with VIN last 6 and the URL host + path hash only. A command is not sent if its audit line cannot be written.
+- `describe_boundary` shows an `experimental` block (key configured, allowlist size, audit on). Docs: `docs/EXPERIMENTAL-SIGNED-COMMANDS.md`.
+
 ## 0.3.3 (unreleased)
 
 - New, opt-in and **off by default**: `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE`. When set to an absolute path, the MCP server (not the auth helper) refreshes once at startup and then about 10 minutes before each access-token expiry, and writes the raw token string there each time (no newline, no JSON, never the refresh token), atomically (temp `0600` + fsync + rename), with a missing parent directory created `0700`. The keep-fresh loop shares the server's single-flight refresh, store lock and auth rate limit, backs off 1/5/15 min on failure, stops on `login_required` (file left as is), and its timer is unref'd. The file stays fresh only while the server runs; after it stops the token expires within about 8 h.

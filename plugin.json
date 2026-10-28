@@ -177,6 +177,21 @@
         "type": "string",
         "title": "Monthly discount (USD)",
         "description": "Optional. Local usage estimate only. Default 10 (Tesla's monthly discount); 0 allowed."
+      },
+      "TESLA_FLEET_COMMAND_KEY_FILE": {
+        "type": "string",
+        "title": "Command key file (experimental)",
+        "description": "Optional. Absolute path to the virtual-key private key (PEM, P-256) used ONLY by the EXPERIMENTAL play_video_on_screen tool to sign locally (Fleet API signed_command). Set it only on the host that already holds the key (the same key your command proxy uses); never commit it."
+      },
+      "TESLA_FLEET_VIDEO_HOST_ALLOWLIST": {
+        "type": "string",
+        "title": "Video host allowlist (experimental)",
+        "description": "Optional. Comma-separated host names play_video_on_screen may send without a second approval, e.g. video.example.com,*.cdn.example.com (*. = subdomains only). Unset = every host needs allow_unlisted_host=true."
+      },
+      "TESLA_FLEET_AUDIT_LOG": {
+        "type": "string",
+        "title": "Audit log file",
+        "description": "Optional. JSONL audit log for experimental signed commands (VIN last 6, URL host + path hash only). Default: audit.jsonl next to the token store."
       }
     },
     "required": [

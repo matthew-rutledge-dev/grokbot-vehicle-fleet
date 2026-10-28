@@ -86,6 +86,9 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_RATE_COMMANDS_PER_USD` | no | Usage estimate only: commands per USD (default `1000`) |
 | `TESLA_FLEET_RATE_WAKES_PER_USD` | no | Usage estimate only: wakes per USD (default `50`) |
 | `TESLA_FLEET_MONTHLY_DISCOUNT_USD` | no | Usage estimate only: monthly discount in USD (default `10`; `0` allowed) |
+| `TESLA_FLEET_COMMAND_KEY_FILE` | experimental only | Path to the virtual-key **private** key (PEM, P-256) used only by the EXPERIMENTAL `play_video_on_screen` to sign locally. Set it only on the host that already holds the key; **never commit** |
+| `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` | no | Comma-separated hosts `play_video_on_screen` may send without a second approval (`video.example.com,*.cdn.example.com`; `*.` = subdomains only). Unset = every host needs `allow_unlisted_host=true` |
+| `TESLA_FLEET_AUDIT_LOG` | no | JSONL audit log for experimental signed commands (default `audit.jsonl` next to the token store; VIN last 6, URL host + path hash only) |
 
 **Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
@@ -159,6 +162,10 @@ Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AU
 
 `door_unlock` and `actuate_trunk` require an explicit `vin`. Local rate limits stay under the documented per-vehicle limits (data 60/min, commands 30/min, wakes 3/min).
 
+### Experimental: `play_video_on_screen`
+
+**EXPERIMENTAL, unverified on live vehicles.** Asks the car to open a video URL on its screen with CarServer `videoRequestAction` (field 57, community-documented, not in Tesla's published protos). Stock `tesla-http-proxy` cannot send it, so the server signs the message itself with the virtual key (`TESLA_FLEET_COMMAND_KEY_FILE`, only on the host that holds the key) and posts it to the Fleet API's `/api/1/vehicles/{VIN}/signed_command` (same Fleet API host as reads; no new endpoint). Same gates as every command (hidden unless read-only is off, dry-run without `confirm`, `user_request`, online + paired checks, no auto-wake, no retry), plus: `https` public host names only (no IPs, localhost, private names or credentials, max 2048 characters), a host allowlist (`TESLA_FLEET_VIDEO_HOST_ALLOWLIST`; other hosts need `allow_unlisted_host=true` after the user approves that host), and an audit log line for every call. Costs 2 billed command requests. Details, the audit format and what is unverified: [docs/EXPERIMENTAL-SIGNED-COMMANDS.md](docs/EXPERIMENTAL-SIGNED-COMMANDS.md). With it, command-mode tool counts are one higher.
+
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
 Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, media, software updates, off-grid vehicle charging reserve.
@@ -220,6 +227,7 @@ No other endpoints, no telemetry, no analytics.
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
+- The experimental `play_video_on_screen` writes an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): VIN last 6 and the URL host plus a path hash only, never the full URL, query, tokens or keys.
 
 ## Event triggers and telemetry alerts (separate bridge)
 

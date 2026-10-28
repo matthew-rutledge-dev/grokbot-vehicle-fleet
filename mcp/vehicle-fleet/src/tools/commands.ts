@@ -227,7 +227,7 @@ const SPECS: CommandSpec[] = [
 ];
 
 /** VIN without any network call (for dry-runs). */
-function offlineVin(args: ToolArgs, ctx: ToolContext, explicit?: boolean): string | undefined {
+export function offlineVin(args: ToolArgs, ctx: ToolContext, explicit?: boolean): string | undefined {
   if (typeof args.vin === "string" && args.vin.trim()) return args.vin.trim().toUpperCase();
   return explicit ? undefined : ctx.config.defaultVin?.toUpperCase();
 }
@@ -240,7 +240,7 @@ export function requireIntent(args: ToolArgs): void {
   }
 }
 
-function pairingHint(ctx: ToolContext): string {
+export function pairingHint(ctx: ToolContext): string {
   const domain = ctx.config.keyDomain ?? "<your-domain>";
   return `Pair the app's virtual key in the Tesla app: https://www.tesla.com/_ak/${domain}`;
 }

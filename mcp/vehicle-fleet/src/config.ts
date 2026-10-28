@@ -2,6 +2,7 @@
  * One frozen Config built from env at start. Every value is installer config;
  * nothing is hardcoded except Tesla's documented public endpoints.
  */
+import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { resolveExportPath } from "./tokenexport.js";
@@ -49,6 +50,9 @@ export const ENV = {
   RATE_COMMANDS: "TESLA_FLEET_RATE_COMMANDS_PER_USD",
   RATE_WAKES: "TESLA_FLEET_RATE_WAKES_PER_USD",
   MONTHLY_DISCOUNT: "TESLA_FLEET_MONTHLY_DISCOUNT_USD",
+  COMMAND_KEY_FILE: "TESLA_FLEET_COMMAND_KEY_FILE",
+  VIDEO_HOST_ALLOWLIST: "TESLA_FLEET_VIDEO_HOST_ALLOWLIST",
+  AUDIT_LOG: "TESLA_FLEET_AUDIT_LOG",
 } as const;
 
 /** Defaults for the climate_warm_up preset (all overridable per call). */
@@ -157,6 +161,15 @@ export type Config = {
   keyDomain?: string;
   /** Rates for the local usage estimate (get_api_usage). */
   rates: Rates;
+  /**
+   * Virtual-key private key (PEM) for the EXPERIMENTAL signed_command helper. Read only at send
+   * time on the host where the key lives; never logged or returned.
+   */
+  commandKeyFile?: string;
+  /** Hosts play_video_on_screen may send without allow_unlisted_host (exact, or "*.domain" for subdomains). */
+  videoHostAllowlist: string[];
+  /** JSONL audit log for experimental signed commands (default: audit.jsonl next to the token store). */
+  auditLogPath: string;
   /** Config problems found at start (no secret values). */
   problems: string[];
   /** Non-fatal warnings for stderr (no secret values). */
@@ -271,6 +284,9 @@ export function loadConfig(env: Env = process.env): Config {
   const tokenExport = resolveExportPath(readEnv(ENV.ACCESS_TOKEN_EXPORT_FILE, env), tokenStorePath);
   if (tokenExport.warning) warnings.push(tokenExport.warning);
 
+  const auditLogPath = readEnv(ENV.AUDIT_LOG, env) ?? path.join(path.dirname(tokenStorePath), "audit.jsonl");
+  const videoHostAllowlist = parseHostAllowlist(readEnv(ENV.VIDEO_HOST_ALLOWLIST, env), warnings);
+
   const clientId = readEnvWithAlias(ENV.CLIENT_ID, ENV.CLIENT_ID_ALIAS, env);
   if (!clientId) problems.push(`${ENV.CLIENT_ID} (or ${ENV.CLIENT_ID_ALIAS}) is not set`);
 
@@ -293,9 +309,49 @@ export function loadConfig(env: Env = process.env): Config {
     climate: loadClimate(env, warnings),
     keyDomain: readEnv(ENV.KEY_DOMAIN, env),
     rates,
+    commandKeyFile: readEnv(ENV.COMMAND_KEY_FILE, env),
+    videoHostAllowlist,
+    auditLogPath,
     problems,
     warnings,
   });
+}
+
+/**
+ * Comma-separated host allowlist. Entries: a host name (exact match) or "*.example.com"
+ * (subdomains only). Lower-cased and IDNA-normalised; IP literals, ports, paths and other
+ * junk are dropped with one warning (never echoed).
+ */
+export function parseHostAllowlist(raw: string | undefined, warnings: string[]): string[] {
+  if (!raw) return [];
+  const out = new Set<string>();
+  let bad = 0;
+  for (const item of raw.split(",")) {
+    const t = item.trim().toLowerCase();
+    if (!t) continue;
+    const wildcard = t.startsWith("*.");
+    const host = wildcard ? t.slice(2) : t;
+    let norm: string | undefined;
+    try {
+      const u = new URL(`https://${host}/`);
+      if (u.hostname && u.port === "" && u.pathname === "/" && !u.username && !u.password && !u.search && !u.hash) norm = u.hostname;
+    } catch {
+      norm = undefined;
+    }
+    if (!norm || isIpLiteral(norm) || !norm.includes(".") || norm.endsWith(".")) {
+      bad++;
+      continue;
+    }
+    out.add(wildcard ? `*.${norm}` : norm);
+  }
+  if (bad) warnings.push(`${ENV.VIDEO_HOST_ALLOWLIST}: ${bad} entr${bad === 1 ? "y" : "ies"} ignored (use host names like video.example.com or *.example.com; no IPs, ports or paths).`);
+  return [...out];
+}
+
+/** IPv4 / IPv6 literal (with or without brackets). */
+export function isIpLiteral(host: string): boolean {
+  const h = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  return net.isIP(h) !== 0;
 }
 
 /** set/missing map for describe_boundary. Never values. */

@@ -7,6 +7,7 @@
  */
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { AuditLog } from "./audit.js";
 import { TokenManager } from "./auth.js";
 import { KeepFresh, type Scheduler } from "./tokenexport.js";
 import { loadConfig, type Config } from "./config.js";
@@ -42,7 +43,7 @@ export function buildContext(deps: ServerDeps = {}): ToolContext {
   const limiter = new RateLimiter();
   const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter);
   const fleet = new FleetClient(config, http, tokens, limiter, deps.fleetOptions);
-  return { config, fleet, tokens, env, usage };
+  return { config, fleet, tokens, env, usage, audit: new AuditLog(config.auditLogPath, deps.now) };
 }
 
 /**

@@ -1,3 +1,4 @@
+import type { AuditLog } from "./audit.js";
 import type { TokenManager } from "./auth.js";
 import type { Config } from "./config.js";
 import type { FleetClient } from "./fleet.js";
@@ -10,6 +11,7 @@ export type ToolContext = {
   tokens: TokenManager;
   env: Env;
   usage: UsageTracker;
+  audit: AuditLog;
 };
 
 export type ToolArgs = Record<string, unknown>;

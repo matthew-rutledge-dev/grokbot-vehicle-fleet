@@ -346,4 +346,24 @@ export class FleetClient {
     this.cache.deletePrefix(`cached:${vin}`);
     return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
   }
+
+  /**
+   * EXPERIMENTAL: POST one Vehicle Command Protocol RoutableMessage (base64) to Fleet API
+   * /api/1/vehicles/{vin}/signed_command and return the base64 response message. Goes to
+   * the Fleet API directly (not the proxy): the message is already signed locally.
+   * Billed as a command; never retried.
+   */
+  async signedCommand(vin: string, routableMessageB64: string): Promise<string> {
+    this.limiter.take("command", vin);
+    const base = await this.resolveBaseUrl();
+    const url = `${base}/api/1/vehicles/${encodeURIComponent(vin)}/signed_command`;
+    const res = await this.call("command", "POST", url, { routable_message: routableMessageB64 }, undefined, 30_000);
+    this.cache.deletePrefix(`live:${vin}`);
+    this.cache.deletePrefix(`cached:${vin}`);
+    const r = unwrap<unknown>(res.body);
+    if (typeof r !== "string" || !/^[A-Za-z0-9+/=_-]+$/.test(r)) {
+      throw new Error("signed_command returned an unexpected body (no base64 response message)");
+    }
+    return r;
+  }
 }
