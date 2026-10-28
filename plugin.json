@@ -191,7 +191,7 @@
       "TESLA_FLEET_AUDIT_LOG": {
         "type": "string",
         "title": "Audit log file",
-        "description": "Optional. JSONL audit log for experimental signed commands (VIN last 6, URL host + path hash only). Default: audit.jsonl next to the token store."
+        "description": "Optional. JSONL audit log for experimental signed commands (full VIN, URL host + path hash only). Default: audit.jsonl next to the token store."
       }
     },
     "required": [

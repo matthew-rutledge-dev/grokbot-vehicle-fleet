@@ -8,6 +8,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
+import { auditVin } from "../src/audit.js";
 import { loadConfig, parseHostAllowlist } from "../src/config.js";
 import { encodeVideoRequestAction } from "../src/signed/messages.js";
 import { hostAllowed, validateVideoUrl } from "../src/tools/videourl.js";
@@ -61,7 +62,10 @@ function auditLines(e: Record<string, string>): Array<Record<string, unknown>> {
 
 function assertAuditHygiene(e: Record<string, string>) {
   const raw = fs.existsSync(e.TESLA_FLEET_AUDIT_LOG) ? fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8") : "";
-  assert.ok(!raw.includes(VIN), "no full VIN");
+  for (const l of raw.split("\n").filter(Boolean)) {
+    const v = (JSON.parse(l) as { vin?: unknown }).vin;
+    assert.ok(v === undefined || v === null || v === VIN, "audit vin is the full VIN (or null)");
+  }
   assert.ok(!raw.includes("SECRET-QUERY"), "no query string");
   assert.ok(!raw.includes("/clips/intro.mp4"), "no path");
   assert.ok(!raw.includes("access-EXAMPLE"), "no token");
@@ -69,6 +73,16 @@ function assertAuditHygiene(e: Record<string, string>) {
 }
 
 const fake = (o: Partial<FakeVehicleOptions> = {}) => new FakeVehicle({ vin: VIN, ...o });
+
+// ---------- audit VIN ----------
+
+test("auditVin: full 17-character VIN, upper-cased; null when unknown or not VIN-shaped", () => {
+  assert.equal(auditVin(VIN), VIN);
+  assert.equal(auditVin(` ${VIN.toLowerCase()} `), VIN);
+  assert.equal(auditVin(undefined), null);
+  assert.equal(auditVin("SHORT"), null);
+  assert.equal(auditVin(`${VIN}\n{"x":1}`), null);
+});
 
 // ---------- URL validation ----------
 
@@ -152,7 +166,8 @@ test("without confirm: dry-run preview (host + path hash only), zero network, au
   const a = auditLines(e);
   assert.equal(a.length, 1);
   assert.equal(a[0].event, "dry_run");
-  assert.equal(a[0].vinLast6, "XAMPLE");
+  assert.equal(a[0].vin, VIN, "audit records the full VIN");
+  assert.equal("vinLast6" in a[0], false);
   assertAuditHygiene(e);
 });
 

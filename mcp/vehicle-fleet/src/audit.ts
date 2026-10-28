@@ -1,7 +1,7 @@
 /**
  * Append-only JSONL audit log for experimental signed commands.
- * Entries never hold a full VIN (last 6 only), a full URL, a query string,
- * a token or key material: callers pass already-reduced fields. URL paths are
+ * Entries record the full VIN (a VIN is not a secret) but never a full URL,
+ * a query string, a token or key material: callers pass already-reduced fields. URL paths are
  * recorded only as a KEYED hash (HMAC-SHA256 with a per-install random salt
  * kept next to the log as "<log>.salt", 0600), so a short or guessable path
  * cannot be recovered by hashing candidates without that file.
@@ -20,15 +20,15 @@ export type AuditEvent = "refused" | "dry_run" | "attempt" | "result" | "failure
 export type AuditEntry = {
   tool: string;
   event: AuditEvent;
-  vinLast6?: string | null;
+  vin?: string | null;
   [k: string]: unknown;
 };
 
-/** Last 6 of a VIN for audit entries; null when unknown. */
-export function vinLast6(vin: string | undefined | null): string | null {
+/** Full VIN for audit entries (17 VIN characters, upper-cased); null when unknown or not VIN-shaped. */
+export function auditVin(vin: string | undefined | null): string | null {
   if (!vin) return null;
   const v = String(vin).trim().toUpperCase();
-  return v.length >= 6 ? v.slice(-6) : null;
+  return /^[A-HJ-NPR-Z0-9]{17}$/.test(v) ? v : null;
 }
 
 const POSIX = process.platform !== "win32" && typeof process.getuid === "function";

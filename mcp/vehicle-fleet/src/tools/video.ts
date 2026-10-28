@@ -13,7 +13,7 @@
  * Every call is audited (src/audit.ts) without the full URL or VIN.
  */
 import fs from "node:fs";
-import { vinLast6, type AuditEvent } from "../audit.js";
+import { auditVin, type AuditEvent } from "../audit.js";
 import { FleetApiError, LocalRefusal } from "../errors.js";
 import { maskVin } from "../redact.js";
 import { loadPrivateKeyPem, SignedCommandError } from "../signed/crypto.js";
@@ -122,7 +122,7 @@ export const PLAY_VIDEO: ToolDef = {
   },
   handler: async (args: ToolArgs, ctx: ToolContext) => {
     const preVin = offlineVin(args, ctx);
-    const base: Record<string, unknown> = { vinLast6: vinLast6(preVin) };
+    const base: Record<string, unknown> = { vin: auditVin(preVin) };
 
     let video: VideoUrl;
     try {
@@ -204,7 +204,7 @@ export const PLAY_VIDEO: ToolDef = {
     let vin: string;
     try {
       vin = await ctx.fleet.resolveVin(args.vin);
-      base.vinLast6 = vinLast6(vin);
+      base.vin = auditVin(vin);
       await ctx.fleet.requireOnline(vin);
       const fsx = await ctx.fleet.fleetStatus(vin);
       if (fsx.paired === false) throw new LocalRefusal("virtual_key_missing", "This app's virtual key is not paired with the vehicle; nothing was sent.", pairingHint(ctx));
