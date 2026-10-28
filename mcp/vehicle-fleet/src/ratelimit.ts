@@ -53,3 +53,36 @@ export class RateLimiter {
     }
   }
 }
+
+/**
+ * Local limit for the public NHTSA recalls API (a courtesy to a free public service, on top of
+ * the 6 h response cache): at most one request every NHTSA_MIN_INTERVAL_MS and NHTSA_MAX_PER_HOUR
+ * per rolling hour, per server. Refuses locally; nothing is sent.
+ */
+export const NHTSA_MIN_INTERVAL_MS = 5_000;
+export const NHTSA_MAX_PER_HOUR = 20;
+
+export class NhtsaLimiter {
+  private sent: number[] = [];
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly minIntervalMs = NHTSA_MIN_INTERVAL_MS,
+    private readonly maxPerHour = NHTSA_MAX_PER_HOUR,
+  ) {}
+
+  /** Record one request or throw LocalRefusal("rate_limited_locally"). */
+  take(): void {
+    const t = this.now();
+    this.sent = this.sent.filter((s) => t - s < 3_600_000);
+    const last = this.sent[this.sent.length - 1];
+    let waitMs = 0;
+    if (last !== undefined && t - last < this.minIntervalMs) waitMs = this.minIntervalMs - (t - last);
+    if (this.sent.length >= this.maxPerHour) waitMs = Math.max(waitMs, 3_600_000 - (t - this.sent[0]));
+    if (waitMs > 0) {
+      throw new LocalRefusal("rate_limited_locally",
+        "Local NHTSA rate limit reached; nothing was sent.",
+        "Wait and try again; do not loop. Recalls change rarely.", { retryAfterSec: Math.ceil(waitMs / 1000) });
+    }
+    this.sent.push(t);
+  }
+}

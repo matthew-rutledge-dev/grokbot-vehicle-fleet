@@ -58,7 +58,7 @@ export function startTokenKeepFresh(ctx: ToolContext, deps: { now?: () => number
 }
 
 export function createServer(ctx: ToolContext): Server {
-  const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled };
+  const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled, nhtsaEnabled: ctx.config.nhtsaEnabled };
   const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues()];
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
 
@@ -74,6 +74,12 @@ export function createServer(ctx: ToolContext): Server {
         return jsonResult({
           ok: false, readOnly: true, sent: false,
           error: `Refused: ${name} is a command tool and the server is read-only (${READ_ONLY_ENV} not explicitly off). Nothing was sent.`,
+        }, true);
+      }
+      if (def.nhtsa) {
+        return jsonResult({
+          ok: false, nhtsaEnabled: false, sent: false,
+          error: `Refused: ${name} is turned off (TESLA_FLEET_DISABLE_NHTSA is on or an unrecognised value). Nothing was sent.`,
         }, true);
       }
       return jsonResult({

@@ -13,7 +13,8 @@ import type { ToolContext } from "../src/context.js";
 
 export const READ_TOOLS = [
   "describe_boundary", "get_api_usage", "api_status", "list_vehicles", "get_vehicle_state", "get_fleet_status",
-  "get_battery_charge", "get_climate", "get_closures", "get_tires", "get_vehicle_snapshot",
+  "get_battery_charge", "get_climate", "get_closures", "get_tires", "get_vehicle_status", "get_vehicle_snapshot",
+  "get_recent_alerts", "get_release_notes", "get_service_status", "get_warranty", "get_recalls",
   "list_energy_sites", "get_energy_live_status", "get_energy_site_info", "get_energy_history",
 ];
 export const VEHICLE_COMMANDS = [

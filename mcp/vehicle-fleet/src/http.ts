@@ -25,6 +25,8 @@ export type RequestOptions = {
   form?: Record<string, string>;
   dispatcher?: Dispatcher;
   timeoutMs?: number;
+  /** A public, non-Tesla endpoint (e.g. NHTSA): never sent a token, not counted as Fleet API usage. */
+  external?: boolean;
 };
 
 export type HttpResponse = { status: number; body: unknown; headers: Headers };
@@ -62,11 +64,11 @@ export class Http {
     if (opts.form) {
       headers["Content-Type"] = "application/x-www-form-urlencoded";
       body = new URLSearchParams(opts.form).toString();
-    } else {
+    } else if (opts.json !== undefined) {
       headers["Content-Type"] = "application/json";
-      if (opts.json !== undefined) body = JSON.stringify(opts.json);
+      body = JSON.stringify(opts.json);
     }
-    if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+    if (opts.token && !opts.external) headers.Authorization = `Bearer ${opts.token}`;
     let res: Awaited<ReturnType<FetchLike>>;
     try {
       res = await this.fetchImpl(opts.url, {
@@ -77,11 +79,13 @@ export class Http {
         signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
       });
     } catch (e) {
-      await this.usage?.record(category, undefined);
+      if (!opts.external) await this.usage?.record(category, undefined);
       throw e;
     }
-    await this.usage?.record(category, res.status);
-    if (category !== "auth" && res.status < 500) this.billable++;
+    if (!opts.external) {
+      await this.usage?.record(category, res.status);
+      if (category !== "auth" && res.status < 500) this.billable++;
+    }
     const text = await res.text();
     let parsed: unknown = undefined;
     if (text) {

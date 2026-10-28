@@ -1,14 +1,31 @@
 # Changelog
 
-## Unreleased: experimental `play_video_on_screen`
+## 0.5.0 (unreleased)
 
-Version number left as is on purpose; this lands after 0.4.0 and takes the next version then.
+Experimental `play_video_on_screen`.
 
 - New EXPERIMENTAL command `play_video_on_screen` (hidden unless read-only is off): asks the car to open a video URL on its screen via CarServer `videoRequestAction` (field 57, community-documented, unverified on live vehicles). Dry-run without `confirm`; `confirm=true` needs `user_request`; honours `TESLA_FLEET_DRY_RUN`; vehicle must be online (no auto-wake) and the key paired; never retried.
 - URL checks before anything else: `https` only, no credentials, no IP literals, no `localhost` / single-label / private or special-use names, no whitespace, max 2048 characters. New `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` (exact hosts or `*.domain`); any other host, or every host when the list is unset, also needs `allow_unlisted_host=true`. Non-default ports only when an allowlist entry names them (`host:port`). The normalised URL is also capped at 2048 characters. Documented limit: names resolving to private addresses and look-alike characters are not detected, hence the explicit approval for unlisted hosts.
 - New self-contained signed_command helper (`src/signed/`): Vehicle Command Protocol handshake (session info HMAC-verified), HMAC-SHA256 personalized command authentication, AES-GCM ack decryption, sent to Fleet API `/api/1/vehicles/{vin}/signed_command` (not the proxy, which cannot encode this action). Needs the virtual-key private key on the same host: new `TESLA_FLEET_COMMAND_KEY_FILE`, which must be `chmod 600` and owned by the server's user on POSIX (`command_key_insecure_permissions` otherwise); previews only stat it. Unencrypted replies are reported as unverified; an unusable 200 reply to the command is `state_unknown`. Checked against `vehicle-command`'s protocol.md examples and byte for byte against its Go implementation. 2 billed command requests per call.
 - New audit log for experimental signed commands, `TESLA_FLEET_AUDIT_LOG` (default `audit.jsonl` next to the token store, `0600`): refused / dry_run / attempt / result / failure, with the full VIN and the URL host + keyed path hash only (HMAC with a per-install salt in `<log>.salt`). Existing log files and folders are tightened to `0600`/`0700`. Writability is checked before the billable pre-checks; a command is not sent if its audit line cannot be written.
 - `describe_boundary` shows an `experimental` block (key configured, allowlist size, audit on). Docs: `docs/EXPERIMENTAL-SIGNED-COMMANDS.md`.
+- Tool counts: 22 read-only, 49 with commands on (one fewer each with location off, and one fewer each with NHTSA disabled).
+
+## 0.4.0 (unreleased)
+
+Ownership reads. All read-only, no confirm, never wake the car; nothing is hidden or unlocked by them, and the read-only switch still fails closed.
+
+- `get_vehicle_status` (and snapshot section `status`): firmware version, a pending or in-progress software update (`status`, `version`, `download_perc`, `install_perc`, `expected_duration_sec`, `scheduled_time_ms`, plus `pending`), odometer in mi and km, service mode. From `vehicle_state`, cached by default. `get_vehicle_snapshot` now defaults to all five sections.
+- `get_tires` adds `recommendedPsi` and `psiBelowRecommended` per tire when the car reports a recommended cold pressure.
+- `get_recent_alerts` (`recent_alerts`), `get_release_notes` (`release_notes`; image links left out), `get_service_status` (`service_data`: service status, estimated completion, visit number) and `get_warranty` (`dx/warranty/details`: active, upcoming, expired). One billable data call each, cached in memory 5 min to 6 h, rate-limited like other data reads.
+- `get_recalls`: the Fleet API has no recalls endpoint, so this reads the public NHTSA recalls API by make, model and model year decoded from the VIN locally. Neither the VIN nor the token is sent to NHTSA, and the call is not counted as Fleet API usage. Covers the model year, not the exact car. An undecodable VIN is refused before any call unless `model` and `model_year` are passed.
+- `get_recalls` hardening: the `model` argument is checked in the handler against the five Tesla models (case-insensitive) and anything else, such as free text or a VIN, is refused with `invalid_arguments` before any network call. VIN decoding now requires a Tesla manufacturer code (`5YJ`, `7SA`, `7G2`, `LRW`, `XP7`, `SFZ`). A local NHTSA limiter (one request per 5 s, 20 per rolling hour, on top of the 6 h cache) refuses with `rate_limited_locally` and sends nothing.
+- New `TESLA_FLEET_DISABLE_NHTSA`: `1`/`true`/`yes`/`on` (or an unrecognised value, with a warning) hides and refuses `get_recalls`, so nothing is sent to NHTSA. `describe_boundary` shows `nhtsaRecallsEnabled`.
+- `get_tires`: `psiBelowRecommended` is clamped at 0 (a tire at or above the recommended pressure reads 0, never negative).
+- `get_service_status`: `otherKeys` lists up to 20 names of other fields Tesla returned (names only, never values); documented.
+- HTTP: `Content-Type` is sent only with a request body (bodiless GETs, including NHTSA, no longer send it).
+- Docs: `docs/TELEMETRY-FIELDS.md` lists the Fleet Telemetry fields and intervals the separate event bridge needs for ownership events, what Tesla does not expose, the `alert_types` caveat and an example `fleet_telemetry_config` body (placeholders; reference only, not pushed). README endpoint table adds NHTSA.
+- Tool counts: 22 read-only, 48 with commands on (one fewer each with location off, and one fewer each with NHTSA disabled).
 
 ## 0.3.3 (unreleased)
 

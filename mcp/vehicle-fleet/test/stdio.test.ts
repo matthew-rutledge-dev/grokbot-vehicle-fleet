@@ -88,7 +88,7 @@ test("initialize + default (placeholders) = read-only: no command tools", async 
     assert.equal(text(res).readOnly, true);
     const b = text(await c.callTool({ name: "describe_boundary", arguments: {} }));
     assert.match(String(b.readOnlyStatus), /unexpanded placeholder/);
-    assert.equal(names.length, 16);
+    assert.equal(names.length, 22);
     const u = text(await c.callTool({ name: "get_api_usage", arguments: {} }));
     assert.equal(u.ok, true);
     assert.equal(u.localEstimate, true);
@@ -106,7 +106,7 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, "get_location"].sort());
-    assert.equal(names.length, 43);
+    assert.equal(names.length, 49);
     assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));
