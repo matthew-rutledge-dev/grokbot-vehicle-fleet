@@ -72,11 +72,15 @@ const fake = (o: Partial<FakeVehicleOptions> = {}) => new FakeVehicle({ vin: VIN
 
 // ---------- URL validation ----------
 
-test("validateVideoUrl: accepts public https; host lower-cased; path hashed", () => {
-  const v = validateVideoUrl("https://Video.Example.com/a.mp4?x=1");
+test("validateVideoUrl: accepts public https; host lower-cased; port and path kept for the keyed hash", () => {
+  const v = validateVideoUrl("https://Video.Example.com/clips/intro.mp4?sig=SECRET-QUERY-EXAMPLE");
   assert.equal(v.host, "video.example.com");
-  assert.match(v.pathHash, /^[0-9a-f]{16}$/);
-  assert.notEqual(v.pathHash, validateVideoUrl("https://video.example.com/a.mp4?x=2").pathHash);
+  assert.equal(v.port, "");
+  assert.equal(v.pathAndQuery, "/clips/intro.mp4?sig=SECRET-QUERY-EXAMPLE");
+  assert.equal(validateVideoUrl("https://video.example.com:443/a.mp4").port, "", "default port normalised away");
+  assert.equal(validateVideoUrl("https://video.example.com:8443/a.mp4").port, "8443");
+  // Raw input is short, but the normalised (percent-encoded) URL would exceed the cap.
+  assert.throws(() => validateVideoUrl(`https://video.example.com/${"\u00e9".repeat(400)}`), (e: unknown) => (e as { code?: string }).code === "invalid_video_url");
 });
 
 test("validateVideoUrl: refuses non-https, credentials, IPs, localhost/private names, junk, overlong", () => {
@@ -94,7 +98,7 @@ test("validateVideoUrl: refuses non-https, credentials, IPs, localhost/private n
 test("allowlist parsing and matching: exact host, *.domain = subdomains only; junk dropped with one warning", () => {
   const w: string[] = [];
   const list = parseHostAllowlist("Video.Example.com, *.cdn.example.net, 192.0.2.1, example.org:8443, example.com/path, single, ,", w);
-  assert.deepEqual(list, ["video.example.com", "*.cdn.example.net"]);
+  assert.deepEqual(list, ["video.example.com", "*.cdn.example.net", "example.org:8443"]);
   assert.equal(w.length, 1);
   assert.ok(!w[0].includes("192.0.2.1"), "warning does not echo entries");
   assert.equal(hostAllowed("video.example.com", list), true);
@@ -102,6 +106,9 @@ test("allowlist parsing and matching: exact host, *.domain = subdomains only; ju
   assert.equal(hostAllowed("a.cdn.example.net", list), true);
   assert.equal(hostAllowed("cdn.example.net", list), false);
   assert.equal(hostAllowed("cdn.example.net.evil.example", list), false);
+  assert.equal(hostAllowed("example.org", list, "8443"), true, "entry names the port");
+  assert.equal(hostAllowed("example.org", list), false, "port entry does not cover 443");
+  assert.equal(hostAllowed("video.example.com", list, "8443"), false, "portless entry does not cover other ports");
   assert.deepEqual(loadConfig({ TESLA_CLIENT_ID: "x" }).videoHostAllowlist, [], "unset = empty");
 });
 
@@ -138,7 +145,7 @@ test("without confirm: dry-run preview (host + path hash only), zero network, au
   assert.equal(b.experimental, true);
   assert.equal((b.video as { host: string }).host, "video.example.com");
   assert.equal(b.hostAllowlisted, true);
-  assert.equal(b.commandKey, "Command key loaded.");
+  assert.match(String(b.commandKey), /present/);
   assert.equal((b.action as { vehicleAction: number }).vehicleAction, 57);
   assert.ok(!JSON.stringify(b).includes("SECRET-QUERY") && !JSON.stringify(b).includes("intro.mp4"), "URL not echoed");
   assert.equal(calls.length, 0);
@@ -227,7 +234,8 @@ test("command key missing or invalid: refused before any network call", async ()
     assert.equal(calls.length, 0);
   }
   const bad = path.join(tmpDir(), "bad.pem");
-  fs.writeFileSync(bad, "-----BEGIN EC PRIVATE KEY-----\nnot-a-key\n-----END EC PRIVATE KEY-----\n");
+  const label = ["EC", "PRIVATE", "KEY"].join(" "); // built in pieces so secret scanners do not flag a fake key
+  fs.writeFileSync(bad, `-----BEGIN ${label}-----\nnot-a-key\n-----END ${label}-----\n`, { mode: 0o600 });
   const e = env({ TESLA_FLEET_COMMAND_KEY_FILE: bad });
   const { ctx, calls } = setup(e, vehicleRoutes(fake()));
   const c = await connect(ctx);
@@ -353,5 +361,104 @@ test("audit log not writable: refused before sending (fail closed)", async () =>
   const { ctx, calls } = setup(e, vehicleRoutes(fake()));
   const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK, ...intent } }));
   assert.equal(b.code, "audit_log_unavailable");
-  assert.ok(!calls.some((x) => x.url.endsWith("/signed_command")));
+  assert.equal(calls.length, 0, "no billable reads (vehicle, fleet_status) and nothing sent");
+});
+
+// ---------- review follow-ups ----------
+
+test("command key readable by group/others (0644): refused with command_key_insecure_permissions", { skip: process.platform === "win32" }, async () => {
+  const key = keyFile();
+  fs.chmodSync(key, 0o644);
+  for (const args of [{ url: URL_OK, ...intent }, { url: URL_OK }]) {
+    const e = env({ TESLA_FLEET_COMMAND_KEY_FILE: key });
+    const { ctx, calls } = setup(e, vehicleRoutes(fake()));
+    const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: args }));
+    if ("confirm" in args) {
+      assert.equal(b.code, "command_key_insecure_permissions");
+      assert.match(String(b.message ?? b.error ?? JSON.stringify(b)), /chmod 600/);
+    } else {
+      assert.match(String(b.commandKey), /chmod 600/, "preview reports it too");
+    }
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("no-confirm dry-run only stats the key file (an unparseable key still previews as present)", async () => {
+  const bad = path.join(tmpDir(), "garbage.pem");
+  fs.writeFileSync(bad, "garbage", { mode: 0o600 });
+  const e = env({ TESLA_FLEET_COMMAND_KEY_FILE: bad });
+  const { ctx, calls } = setup(e, vehicleRoutes());
+  const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK } }));
+  assert.equal(b.dryRun, true);
+  assert.match(String(b.commandKey), /present/);
+  assert.equal(calls.length, 0);
+});
+
+test("HTTP 200 with an unexpected body: handshake = not sent; command = state unknown", async () => {
+  for (const [badCall, sent, code] of [[1, false, null], [2, "unknown", "state_unknown"]] as const) {
+    const e = env();
+    const v = fake();
+    const { ctx, calls } = setup(e, vehicleRoutes(v, {
+      [`POST ${BASE}/api/1/vehicles/${VIN}/signed_command`]: async (call, n) => {
+        if (n === badCall) return { status: 200, body: { response: null } };
+        return { status: 200, body: { response: await v.handle(VIN, JSON.parse(call.body!).routable_message) } };
+      },
+    }));
+    const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK, ...intent } }));
+    assert.equal(b.sent, sent, `bad body on call ${badCall}`);
+    if (code) assert.equal(b.code, code);
+    assert.equal(calls.filter((x) => x.url.endsWith("/signed_command")).length, badCall, "no retry");
+    assert.equal(auditLines(e).at(-1)!.sent, sent);
+  }
+});
+
+test("unencrypted success reply (old firmware): reported as UNVERIFIED, not 'accepted'", async () => {
+  const e = env();
+  const { ctx } = setup(e, vehicleRoutes(fake({ answer: "plaintext_ok" })));
+  const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK, ...intent } }));
+  assert.equal(b.authenticatedResponse, false);
+  assert.match(String(b.message), /UNVERIFIED/);
+  assert.doesNotMatch(String(b.message), /vehicle accepted/);
+  assert.equal(auditLines(e).at(-1)!.outcome, "accepted_unverified");
+});
+
+test("non-default port: refused unless an allowlist entry names it (allow_unlisted_host does not cover ports)", async () => {
+  const u = "https://video.example.com:8443/clips/intro.mp4";
+  const e1 = env();
+  const s1 = setup(e1, vehicleRoutes(fake()));
+  const b1 = body(await (await connect(s1.ctx)).callTool({ name: TOOL, arguments: { url: u, allow_unlisted_host: true, ...intent } }));
+  assert.equal(b1.code, "video_port_not_allowed");
+  assert.equal(s1.calls.length, 0);
+  const e2 = env({ TESLA_FLEET_VIDEO_HOST_ALLOWLIST: "video.example.com:8443" });
+  const s2 = setup(e2, vehicleRoutes());
+  const b2 = body(await (await connect(s2.ctx)).callTool({ name: TOOL, arguments: { url: u } }));
+  assert.equal(b2.dryRun, true);
+  assert.equal(b2.hostAllowlisted, true);
+  assert.equal((b2.video as { port?: string }).port, "8443");
+});
+
+test("audit: keyed path hash with a per-install 0600 salt; pre-existing loose file and dir are tightened", { skip: process.platform === "win32" }, async () => {
+  const dir = path.join(tmpDir(), "loose");
+  fs.mkdirSync(dir, { mode: 0o755 });
+  fs.chmodSync(dir, 0o755);
+  const log = path.join(dir, "audit.jsonl");
+  fs.writeFileSync(log, "", { mode: 0o644 });
+  fs.chmodSync(log, 0o644);
+  const e = env({ TESLA_FLEET_AUDIT_LOG: log });
+  const { ctx } = setup(e, vehicleRoutes());
+  const b = body(await (await connect(ctx)).callTool({ name: TOOL, arguments: { url: URL_OK } }));
+  assert.equal(fs.statSync(log).mode & 0o777, 0o600, "existing log tightened");
+  assert.equal(fs.statSync(dir).mode & 0o777, 0o700, "existing dir tightened");
+  assert.equal(fs.statSync(`${log}.salt`).mode & 0o777, 0o600, "salt 0600");
+  const h = (b.video as { pathHash: string }).pathHash;
+  assert.match(h, /^[0-9a-f]{16}$/);
+  const unkeyed = crypto.createHash("sha256").update("/clips/intro.mp4?sig=SECRET-QUERY-EXAMPLE").digest("hex").slice(0, 16);
+  assert.notEqual(h, unkeyed, "not a plain hash");
+  assert.equal(auditLines(e)[0].pathHash ?? (auditLines(e)[0].url as { pathHash?: string } | undefined)?.pathHash, h);
+  // Another install (different salt) hashes the same path differently.
+  const e2 = env();
+  const s2 = setup(e2, vehicleRoutes());
+  const b2 = body(await (await connect(s2.ctx)).callTool({ name: TOOL, arguments: { url: URL_OK } }));
+  assert.notEqual((b2.video as { pathHash: string }).pathHash, h);
+  assertAuditHygiene(e);
 });

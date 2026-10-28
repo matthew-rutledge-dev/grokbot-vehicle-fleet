@@ -16,7 +16,7 @@ import crypto from "node:crypto";
 import { test } from "node:test";
 import { SignedCommandClient, SignedPhaseError } from "../src/signed/client.js";
 import {
-  commandMetadata, decryptResponse, hmacPersonalizedTag, loadPrivateKeyPem, Metadata, privateKeyFromScalar, publicKeyBytes,
+  commandMetadata, decryptResponse, hmacPersonalizedTag, loadPrivateKeyPem, Metadata, publicKeyBytes,
   requestHash, responseAad, sessionInfoTag, sharedKey, SignedCommandError, subkey,
 } from "../src/signed/crypto.js";
 import {
@@ -25,10 +25,13 @@ import {
 } from "../src/signed/messages.js";
 import { decodeFields, encodeVarint, ProtoDecodeError } from "../src/signed/protobuf.js";
 import { FakeVehicle } from "./fake-vehicle.js";
+import { privateKeyFromScalar } from "./test-keys.js";
 
 const hx = (s: string) => Buffer.from(s, "hex");
 
-// Tesla's published protocol.md test keys (public; debug only).
+// Tesla's published protocol.md test keys and worked-example values (public; debug only):
+// https://github.com/teslamotors/vehicle-command/blob/main/pkg/protocol/protocol.md
+// ("Test keys", "Handshake", "Key Agreement", "Response authentication", "AES-GCM encryption").
 const CLIENT_D = "2538CDC29A97C19C1E99A637D6CF4F8C970C118B56EDE1E6323E6D162C4B30DB";
 const CLIENT_PUB = "04b2b6bc68c2da0665ce656815594996c62394edd8bea905fe781a754fe6a845a714330902f225e9269d466e05b349981fda9d85cc23c6fb444aa73b629105dc6e";
 const VEHICLE_D = "344EE5B466A7CF1EEB12B6F50331DB2E5EC5834EF5F4BEFCFD8CBE55C2528D70";

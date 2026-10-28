@@ -1,9 +1,15 @@
 /**
  * URL checks for play_video_on_screen (EXPERIMENTAL). The vehicle fetches the
  * URL itself; these checks keep obviously unsafe or private targets out and keep
- * the URL out of logs (host + a short path hash only).
+ * the URL out of logs (host + a keyed path hash only, see audit.ts).
+ *
+ * Limits (by design, no DNS lookups here): a public host NAME that resolves to a
+ * private or loopback address (wildcard-DNS services, "localtest"-style names,
+ * a domain someone points at a LAN IP) passes these checks, and so do
+ * look-alike / confusable characters (IDNA-normalised to punycode, but not
+ * judged). That is why any host that is not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST
+ * needs the separate allow_unlisted_host approval from the user.
  */
-import crypto from "node:crypto";
 import { isIpLiteral } from "../config.js";
 import { LocalRefusal } from "../errors.js";
 
@@ -13,11 +19,13 @@ export const MAX_VIDEO_URL_LENGTH = 2048;
 const PRIVATE_SUFFIXES = [".localhost", ".local", ".internal", ".intranet", ".lan", ".home", ".corp", ".home.arpa", ".localdomain", ".test", ".invalid", ".onion"];
 
 export type VideoUrl = {
-  /** The exact URL that would be sent to the vehicle (never logged or echoed). */
+  /** The exact (normalised) URL that would be sent to the vehicle (never logged or echoed). */
   url: string;
   host: string;
-  /** First 16 hex chars of SHA-256(path + query): lets two log lines be matched without revealing the path. */
-  pathHash: string;
+  /** Explicit non-default port, or "" for 443. */
+  port: string;
+  /** path + query, only ever passed to the keyed hash. */
+  pathAndQuery: string;
 };
 
 function refuse(message: string): never {
@@ -46,12 +54,31 @@ export function validateVideoUrl(raw: unknown): VideoUrl {
   if (bare === "localhost" || !bare.includes(".") || PRIVATE_SUFFIXES.some((x) => bare.endsWith(x))) {
     refuse("url host must be a public host name (not localhost, a single-label or a private/special-use name)");
   }
-  const pathHash = crypto.createHash("sha256").update(`${u.pathname}${u.search}`).digest("hex").slice(0, 16);
-  return { url: u.toString(), host: bare, pathHash };
+  const url = u.toString();
+  // Normalisation (punycode, percent-encoding) can grow the URL: cap what is actually sent.
+  if (url.length > MAX_VIDEO_URL_LENGTH) refuse(`url is longer than ${MAX_VIDEO_URL_LENGTH} characters once normalised`);
+  return { url, host: bare, port: u.port, pathAndQuery: `${u.pathname}${u.search}` };
 }
 
-/** Exact host, or "*.domain" for any subdomain of domain (not the domain itself). */
-export function hostAllowed(host: string, allowlist: readonly string[]): boolean {
+/** Allowlist entry: host (exact) or "*.domain" (subdomains only), optionally ":port". */
+function splitEntry(e: string): { host: string; port: string } {
+  const m = /^(.*?)(?::(\d+))?$/.exec(e)!;
+  return { host: m[1], port: m[2] ?? "" };
+}
+
+function hostMatches(pattern: string, h: string): boolean {
+  return pattern.startsWith("*.") ? h.endsWith(pattern.slice(1)) && h.length > pattern.length - 1 : h === pattern;
+}
+
+/**
+ * Exact host, or "*.domain" for any subdomain of domain (not the domain itself).
+ * The port must match too: an entry without a port covers only the default port (443),
+ * and a non-default port is allowed only by an entry that names it.
+ */
+export function hostAllowed(host: string, allowlist: readonly string[], port = ""): boolean {
   const h = host.toLowerCase();
-  return allowlist.some((e) => (e.startsWith("*.") ? h.endsWith(e.slice(1)) && h.length > e.length - 1 : h === e));
+  return allowlist.some((e) => {
+    const s = splitEntry(e);
+    return s.port === port && hostMatches(s.host, h);
+  });
 }

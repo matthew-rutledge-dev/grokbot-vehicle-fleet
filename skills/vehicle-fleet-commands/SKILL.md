@@ -41,7 +41,7 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 1. Call without `confirm` and read back the host (never repeat the full URL) and `hostAllowlisted`.
 2. If `needsAllowUnlistedHost` is true, ask the user to approve that host by name; only after that pass `allow_unlisted_host=true`.
 3. On an explicit yes for this one command: call with `confirm=true` and `user_request`. Each live send needs its own yes.
-4. `ok: true` means the car accepted the request, not that the video played: ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key. `state_unknown`: do not resend.
+4. `ok: true` with `authenticatedResponse: true` means the car accepted the request, not that the video played; with `authenticatedResponse: false` the reply is unverified. Either way ask the user what the screen shows. `vehicle_protocol_fault` / `vehicle_rejected`: report it and stop. `command_key_*`: the server is not on the host that holds the virtual key (`command_key_insecure_permissions`: the key file needs `chmod 600`). `video_port_not_allowed`: only allowlisted `host:port` entries. `state_unknown`: do not resend.
 
 ## Never
 

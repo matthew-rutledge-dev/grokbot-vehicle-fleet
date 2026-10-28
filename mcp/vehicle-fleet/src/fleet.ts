@@ -9,6 +9,7 @@ import type { TokenManager } from "./auth.js";
 import { TtlCache } from "./cache.js";
 import { REGION_BASE_URLS, type Config } from "./config.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
+import { SignedCommandError } from "./signed/crypto.js";
 import { unwrap, type Http } from "./http.js";
 import type { RateLimiter } from "./ratelimit.js";
 import type { UsageCategory } from "./usage.js";
@@ -362,7 +363,8 @@ export class FleetClient {
     this.cache.deletePrefix(`cached:${vin}`);
     const r = unwrap<unknown>(res.body);
     if (typeof r !== "string" || !/^[A-Za-z0-9+/=_-]+$/.test(r)) {
-      throw new Error("signed_command returned an unexpected body (no base64 response message)");
+      // The request reached Fleet API (HTTP 2xx), so the command may have been delivered: callers treat this as unknown state.
+      throw new SignedCommandError("bad_response", "signed_command returned an unexpected body (no base64 response message)");
     }
     return r;
   }

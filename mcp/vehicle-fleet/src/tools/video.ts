@@ -31,33 +31,64 @@ const TRANSPORT = "signed_command (Fleet API, signed locally)";
 /** Test seam: signed-client options (clock / randomness). */
 export const signedClientOptions: { value: SignedClientOptions } = { value: {} };
 
-type KeyCheck = { status: "ok" | "not_configured" | "unreadable" | "invalid" };
+type KeyStatus = "ok" | "present" | "not_configured" | "unreadable" | "insecure_permissions" | "wrong_owner" | "invalid";
 
-function checkKey(ctx: ToolContext): { check: KeyCheck; key?: ReturnType<typeof loadPrivateKeyPem> } {
-  const file = ctx.config.commandKeyFile;
-  if (!file) return { check: { status: "not_configured" } };
+const POSIX = process.platform !== "win32" && typeof process.getuid === "function";
+
+/**
+ * Metadata-only check of the key file (never reads it). POSIX: must be a regular file owned by
+ * this user with no group/other permission bits (chmod 600). Windows: existence only.
+ */
+export function statKey(file: string | undefined): KeyStatus {
+  if (!file) return "not_configured";
+  let st: fs.Stats;
+  try {
+    st = fs.statSync(file);
+  } catch {
+    return "unreadable";
+  }
+  if (!st.isFile()) return "unreadable";
+  if (POSIX) {
+    if (st.uid !== process.getuid!()) return "wrong_owner";
+    if (st.mode & 0o077) return "insecure_permissions";
+  }
+  return "present";
+}
+
+/** statKey, then read + parse (send paths only). */
+function loadKey(file: string | undefined): { status: KeyStatus; key?: ReturnType<typeof loadPrivateKeyPem> } {
+  const st = statKey(file);
+  if (st !== "present") return { status: st };
   let pem: string;
   try {
-    pem = fs.readFileSync(file, "utf8");
+    pem = fs.readFileSync(file!, "utf8");
   } catch {
-    return { check: { status: "unreadable" } };
+    return { status: "unreadable" };
   }
   try {
-    return { check: { status: "ok" }, key: loadPrivateKeyPem(pem) };
+    return { status: "ok", key: loadPrivateKeyPem(pem) };
   } catch {
-    return { check: { status: "invalid" } };
+    return { status: "invalid" };
   }
 }
 
-const KEY_TEXT: Record<KeyCheck["status"], string> = {
+const KEY_TEXT: Record<KeyStatus, string> = {
   ok: "Command key loaded.",
+  present: "Command key file present with private permissions (not read in a preview).",
   not_configured: "TESLA_FLEET_COMMAND_KEY_FILE is not set.",
   unreadable: "TESLA_FLEET_COMMAND_KEY_FILE could not be read (missing file or permissions).",
+  insecure_permissions: "TESLA_FLEET_COMMAND_KEY_FILE is readable or writable by other users; run chmod 600 on it.",
+  wrong_owner: "TESLA_FLEET_COMMAND_KEY_FILE is owned by another user; it must be owned by the user running this server (and chmod 600).",
   invalid: "TESLA_FLEET_COMMAND_KEY_FILE is not a P-256 EC private key in PEM format.",
 };
 
-function urlInfo(v: VideoUrl): Record<string, unknown> {
-  return { host: v.host, pathHash: v.pathHash };
+/** Refusal code for a key status (wrong owner shares the permissions code). */
+function keyCode(st: KeyStatus): string {
+  return st === "wrong_owner" ? "command_key_insecure_permissions" : `command_key_${st}`;
+}
+
+function urlInfo(v: VideoUrl, pathHash: string): Record<string, unknown> {
+  return { host: v.host, ...(v.port ? { port: v.port } : {}), pathHash };
 }
 
 async function audit(ctx: ToolContext, e: { event: AuditEvent; [k: string]: unknown }): Promise<boolean> {
@@ -74,7 +105,7 @@ export const PLAY_VIDEO: ToolDef = {
   kind: "command",
   tool: {
     name: PLAY_VIDEO_TOOL,
-    description: "EXPERIMENTAL: ask the vehicle to open a video URL on its center screen (CarServer videoRequestAction, community-documented, unverified on live vehicles; it may be rejected by Fleet API or the car, or do nothing). https only, public host names only (no IPs, localhost or private names, no credentials), max " + MAX_VIDEO_URL_LENGTH + " characters. Hosts not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST also need allow_unlisted_host=true after the user explicitly approves that host (unset allowlist = every host). Signed locally with the virtual key (TESLA_FLEET_COMMAND_KEY_FILE) and sent via Fleet API signed_command, not the proxy: 2 billed command requests (handshake + command). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes). Every call is audit-logged (host and a path hash only).",
+    description: "EXPERIMENTAL: ask the vehicle to open a video URL on its center screen (CarServer videoRequestAction, community-documented, unverified on live vehicles; it may be rejected by Fleet API or the car, or do nothing). https only, public host names only (no IPs, localhost or private names, no credentials), max " + MAX_VIDEO_URL_LENGTH + " characters. Hosts not on TESLA_FLEET_VIDEO_HOST_ALLOWLIST also need allow_unlisted_host=true after the user explicitly approves that host (unset allowlist = every host). Signed locally with the virtual key (TESLA_FLEET_COMMAND_KEY_FILE) and sent via Fleet API signed_command, not the proxy: 2 billed command requests (handshake + command). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes). Every call is audit-logged (host and a keyed path hash only). Non-default ports only when the allowlist entry names the port. The key file must be chmod 600 and owned by the server's user.",
     inputSchema: {
       type: "object",
       properties: {
@@ -100,9 +131,16 @@ export const PLAY_VIDEO: ToolDef = {
       if (e instanceof LocalRefusal) return refuse(ctx, base, e);
       throw e;
     }
-    const listed = hostAllowed(video.host, ctx.config.videoHostAllowlist);
+    const pathHash = (await ctx.audit.keyedHash(video.pathAndQuery)) ?? "unavailable";
+    const listed = hostAllowed(video.host, ctx.config.videoHostAllowlist, video.port);
     const allowUnlisted = args.allow_unlisted_host === true;
-    Object.assign(base, { url: urlInfo(video), hostAllowlisted: listed, allowUnlistedHost: allowUnlisted });
+    Object.assign(base, { url: urlInfo(video, pathHash), hostAllowlisted: listed, allowUnlistedHost: allowUnlisted });
+    if (video.port && !listed) {
+      // A non-default port is never covered by allow_unlisted_host: only an allowlist entry that names it.
+      return refuse(ctx, base, new LocalRefusal("video_port_not_allowed",
+        `Port ${video.port} is not allowed for ${video.host}; nothing was sent.`,
+        `Use the default https port, or add ${video.host}:${video.port} to TESLA_FLEET_VIDEO_HOST_ALLOWLIST.`));
+    }
     const action = encodeVideoRequestAction(video.url);
     const actionInfo = { vehicleAction: VEHICLE_ACTION.VIDEO_REQUEST, name: "videoRequestAction", payloadBytes: action.length };
 
@@ -110,10 +148,10 @@ export const PLAY_VIDEO: ToolDef = {
       await audit(ctx, { ...base, event: "dry_run", mode: "no_confirm" });
       return {
         dryRun: true, sent: false, command: PLAY_VIDEO_TOOL, experimental: true, transport: TRANSPORT,
-        action: actionInfo, video: urlInfo(video), hostAllowlisted: listed,
+        action: actionInfo, video: urlInfo(video, pathHash), hostAllowlisted: listed,
         ...(listed ? {} : { needsAllowUnlistedHost: true }),
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
-        commandKey: KEY_TEXT[checkKey(ctx).check.status],
+        commandKey: KEY_TEXT[statKey(ctx.config.commandKeyFile)],
         wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
         estimatedBillableCalls: "2 commands (session handshake + videoRequestAction) after the 2 checks",
         toSend: listed
@@ -134,25 +172,33 @@ export const PLAY_VIDEO: ToolDef = {
         "Ask the user to approve this host explicitly, then call again with allow_unlisted_host=true; or add the host to TESLA_FLEET_VIDEO_HOST_ALLOWLIST."));
     }
 
-    const keyed = checkKey(ctx);
+    const keyed = loadKey(ctx.config.commandKeyFile);
     if (ctx.config.dryRun) {
       await audit(ctx, { ...base, event: "dry_run", mode: "TESLA_FLEET_DRY_RUN" });
       return {
         dryRun: true, dryRunMode: "TESLA_FLEET_DRY_RUN", sent: false, command: PLAY_VIDEO_TOOL, experimental: true,
-        transport: TRANSPORT, action: actionInfo, video: urlInfo(video), hostAllowlisted: listed,
+        transport: TRANSPORT, action: actionInfo, video: urlInfo(video, pathHash), hostAllowlisted: listed,
         wouldSend: [
           { method: "POST", url: `<fleet base>/api/1/vehicles/${preVin ? maskVin(preVin) : "{vin}"}/signed_command`, body: { routable_message: "<session_info_request, base64>" } },
           { method: "POST", url: `<fleet base>/api/1/vehicles/${preVin ? maskVin(preVin) : "{vin}"}/signed_command`, body: { routable_message: "<HMAC-signed CarServer.Action videoRequestAction, base64>" } },
         ],
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
-        commandKey: KEY_TEXT[keyed.check.status],
+        commandKey: KEY_TEXT[keyed.status],
         note: "Validated only; no network call was made.",
       };
     }
 
     if (!keyed.key) {
-      return refuse(ctx, base, new LocalRefusal(`command_key_${keyed.check.status}`, `${KEY_TEXT[keyed.check.status]} Nothing was sent.`,
-        "Run this server on the host that holds the virtual-key private key (the same key your tesla-http-proxy uses) and set TESLA_FLEET_COMMAND_KEY_FILE to its path. Never copy the key into a repo."));
+      return refuse(ctx, base, new LocalRefusal(keyCode(keyed.status), `${KEY_TEXT[keyed.status]} Nothing was sent.`,
+        keyed.status === "insecure_permissions" || keyed.status === "wrong_owner"
+          ? "chmod 600 the key file and make sure it is owned by the user that runs this server."
+          : "Run this server on the host that holds the virtual-key private key (the same key your tesla-http-proxy uses) and set TESLA_FLEET_COMMAND_KEY_FILE to its path. Never copy the key into a repo."));
+    }
+
+    // Before any billable call: the attempt line must be writable, or nothing is sent.
+    if (!(await ctx.audit.checkWritable())) {
+      throw new LocalRefusal("audit_log_unavailable", "The audit log could not be written, so this experimental command was not sent.",
+        "Fix TESLA_FLEET_AUDIT_LOG (or the token store directory) permissions and try again.");
     }
 
     let vin: string;
@@ -178,11 +224,14 @@ export const PLAY_VIDEO: ToolDef = {
     try {
       const r = await client.sendInfotainmentAction(vin, action);
       if (r.status === "ok") {
-        await audit(ctx, { ...base, event: "result", outcome: "accepted", authenticatedResponse: r.authenticatedResponse });
+        const verified = r.authenticatedResponse;
+        await audit(ctx, { ...base, event: "result", outcome: verified ? "accepted" : "accepted_unverified", authenticatedResponse: verified });
         return {
-          ok: true, sent: true, command: PLAY_VIDEO_TOOL, experimental: true, vinLast4, video: urlInfo(video),
-          authenticatedResponse: r.authenticatedResponse,
-          message: "The vehicle accepted the video request. EXPERIMENTAL: acceptance does not prove the video played; ask the user what the screen shows.",
+          ok: true, sent: true, command: PLAY_VIDEO_TOOL, experimental: true, vinLast4, video: urlInfo(video, pathHash),
+          authenticatedResponse: verified,
+          message: verified
+            ? "The vehicle accepted the video request (authenticated reply). EXPERIMENTAL: acceptance does not prove the video played; ask the user what the screen shows."
+            : "A reply reporting success came back, but it was not encrypted, so it could not be verified as the vehicle's answer (firmware before 2024.38?). Treat the outcome as UNVERIFIED and ask the user what the screen shows.",
         };
       }
       if (r.status === "rejected") {
@@ -222,12 +271,14 @@ export const PLAY_VIDEO: ToolDef = {
         throw inner;
       }
       const f = classifySendFailure(inner, "fleet");
+      // Timeout / 408 / 5xx, or the request reached Fleet API but the reply was unusable (bad body, failed
+      // authentication, undecodable): the command may have been delivered, so the state is unknown.
       if (f?.kind === "unknown" || inner instanceof SignedCommandError) {
-        const detail = f?.kind === "unknown" ? f.detail : (inner as Error).message;
-        await audit(ctx, { ...base, event: "failure", stage: "command", sent: "unknown", code: f?.kind === "unknown" ? "state_unknown" : code });
+        const detail = f?.kind === "unknown" ? f.detail : `${(inner as SignedCommandError).code}: ${(inner as Error).message}`;
+        await audit(ctx, { ...base, event: "failure", stage: "command", sent: "unknown", code: "state_unknown", cause: f?.kind === "unknown" ? f.detail : code });
         return {
           ok: false, sent: "unknown", command: PLAY_VIDEO_TOOL, experimental: true, vinLast4,
-          code: f?.kind === "unknown" ? "state_unknown" : code, cause: detail,
+          code: "state_unknown", cause: detail,
           message: `The video request may or may not have reached the vehicle (${detail}). It was not retried; do not resend blindly.`,
         };
       }

@@ -92,6 +92,8 @@ export class SignedCommandClient {
       throw new SignedCommandError("handshake_fault", `Handshake rejected by the vehicle (${faultName(r.fault)}).`);
     }
     if (!r.sessionInfo || !r.sessionInfoTag) throw new SignedCommandError("handshake_incomplete", "Handshake reply had no session info.");
+    // request_uuid may be absent (Fleet API / some firmware do not echo it). Skipping the check then is safe:
+    // the session-info HMAC below binds our random uuid as TAG_CHALLENGE, so a reply to any other request fails it.
     if (r.requestUuid?.length && !constantTimeEqual(r.requestUuid, uuid)) throw new SignedCommandError("handshake_mismatch", "Handshake reply was for a different request.");
     let info;
     try {
@@ -126,6 +128,9 @@ export class SignedCommandClient {
 
   /** Interpret the vehicle's reply to a signed command. */
   readReply(vin: string, r: ParsedReply, sent: { uuid: Buffer; tag: Buffer }, session: Session): SignedResult {
+    // request_uuid may be absent. For an encrypted ack that is safe: the AES-GCM AAD includes the request hash
+    // (signature type + this command's HMAC tag), so an ack for any other request fails to decrypt. An unencrypted
+    // (pre-2024.38) ack has no such binding and is reported as authenticatedResponse=false (unverified).
     if (r.requestUuid?.length && !constantTimeEqual(r.requestUuid, sent.uuid)) throw new SignedCommandError("bad_response", "reply was for a different request");
     if (r.fromDomain !== undefined && r.fromDomain !== DOMAIN_INFOTAINMENT) throw new SignedCommandError("bad_response", "reply came from an unexpected domain");
     if (r.fault) return { status: "fault", fault: faultName(r.fault), faultCode: r.fault };
@@ -139,7 +144,9 @@ export class SignedCommandClient {
       plaintext = decryptResponse(session.key, r.aesGcmResponse.nonce, r.payload ?? Buffer.alloc(0), r.aesGcmResponse.tag, aad);
       authenticated = true;
     } else {
-      plaintext = r.payload ?? Buffer.alloc(0); // firmware before 2024.38 ignores FLAG_ENCRYPT_RESPONSE
+      // Firmware before 2024.38 ignores FLAG_ENCRYPT_RESPONSE and answers in plaintext. Nothing authenticates that
+      // reply (anyone on the path could have written it), so it is returned as UNVERIFIED, never as a confirmed ack.
+      plaintext = r.payload ?? Buffer.alloc(0);
     }
     let status;
     try {

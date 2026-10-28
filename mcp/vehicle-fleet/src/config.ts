@@ -319,8 +319,9 @@ export function loadConfig(env: Env = process.env): Config {
 
 /**
  * Comma-separated host allowlist. Entries: a host name (exact match) or "*.example.com"
- * (subdomains only). Lower-cased and IDNA-normalised; IP literals, ports, paths and other
- * junk are dropped with one warning (never echoed).
+ * (subdomains only), optionally with ":port" (an entry without a port covers only 443).
+ * Lower-cased and IDNA-normalised; IP literals, paths and other junk are dropped with one
+ * warning (never echoed).
  */
 export function parseHostAllowlist(raw: string | undefined, warnings: string[]): string[] {
   if (!raw) return [];
@@ -332,9 +333,13 @@ export function parseHostAllowlist(raw: string | undefined, warnings: string[]):
     const wildcard = t.startsWith("*.");
     const host = wildcard ? t.slice(2) : t;
     let norm: string | undefined;
+    let port = "";
     try {
       const u = new URL(`https://${host}/`);
-      if (u.hostname && u.port === "" && u.pathname === "/" && !u.username && !u.password && !u.search && !u.hash) norm = u.hostname;
+      if (u.hostname && u.pathname === "/" && !u.username && !u.password && !u.search && !u.hash) {
+        norm = u.hostname;
+        port = u.port; // "" for 443 (normalised away) or an explicit non-default port
+      }
     } catch {
       norm = undefined;
     }
@@ -342,9 +347,10 @@ export function parseHostAllowlist(raw: string | undefined, warnings: string[]):
       bad++;
       continue;
     }
-    out.add(wildcard ? `*.${norm}` : norm);
+    const entry = wildcard ? `*.${norm}` : norm;
+    out.add(port ? `${entry}:${port}` : entry);
   }
-  if (bad) warnings.push(`${ENV.VIDEO_HOST_ALLOWLIST}: ${bad} entr${bad === 1 ? "y" : "ies"} ignored (use host names like video.example.com or *.example.com; no IPs, ports or paths).`);
+  if (bad) warnings.push(`${ENV.VIDEO_HOST_ALLOWLIST}: ${bad} entr${bad === 1 ? "y" : "ies"} ignored (use host names like video.example.com, *.example.com or video.example.com:8443; no IPs or paths).`);
   return [...out];
 }
 
