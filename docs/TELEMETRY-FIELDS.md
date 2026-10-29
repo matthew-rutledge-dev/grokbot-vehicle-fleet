@@ -6,7 +6,8 @@
 
 This plugin answers on-demand reads. Change detection (software updates, odometer milestones, vehicle
 alerts, service, tires, battery, charging faults, safety and Sentry events; immediate or in a weekly
-digest) lives in a separate, self-hosted event bridge that receives Fleet Telemetry. This page lists
+digest) lives in a separate, self-hosted event bridge that receives Fleet Telemetry (the reference
+bridge is [`grok-bot-universal-bridge`](https://github.com/matthew-rutledge-dev/grok-bot-universal-bridge)'s Tesla adapter, whose `telemetry.fields` config is the source of truth for the pushed config). This page lists
 the telemetry fields that bridge needs, with suggested intervals, and an example request body.
 
 Field names are from `teslamotors/fleet-telemetry` `protos/vehicle_data.proto` and the Fleet API
