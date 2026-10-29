@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.0
+
+One new energy command, a skipped vehicle command with the reasons, and review follow-ups from 0.6.2.
+
+- New `set_off_grid_vehicle_charging_reserve` (`POST /api/1/energy_sites/{id}/off_grid_vehicle_charging_reserve`, body `{"off_grid_vehicle_charging_reserve_percent": <int>}`, scope `energy_cmds`, sent directly to the Fleet API like the other energy commands). Body and type checked against Tesla's Fleet API docs (integer, example 20; the docs give no range, so the tool accepts a whole percent 0-100 and refuses floats, strings, booleans, null and anything out of range). Same gates as the other energy commands: hidden and refused unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed), preview without `confirm`, `user_request` required with `confirm=true`, `TESLA_FLEET_DRY_RUN` honoured, never retried. A confirmed live send first makes one fresh `site_info` read (bypassing the cache): `off_grid_vehicle_charging_reserve_supported: false` is refused (`not_supported`), a value already equal to the request returns `noop: true` with nothing sent, otherwise the result carries `previous`; a failed read or an absent value sends anyway with `precheck: "unavailable"`. Not field-tested yet.
+- `get_energy_site_info` now passes through `off_grid_vehicle_charging_reserve_percent` when the site returns it (Tesla's documented example shows only `components.off_grid_vehicle_charging_reserve_supported`, which was already shown).
+- Not added: steering wheel heat level (`remote_steering_wheel_heat_level_request`). Tesla's docs list it with `level` 0 = off, 1 = low, 3 = high; the stock `tesla-http-proxy` has no handler (falls through to `invalid_command`), and Tesla's published protos have no action for it, only the `StwHeatLevel` state enum (0 unknown, 1 off, 2 low, 3 high), which numbers the levels differently from the docs. Nothing verifiable to sign, so recorded in BACKLOG. `set_steering_wheel_heater` stays on/off; no climate default or warm-up step changed.
+- Energy command cache invalidation now deletes the site's exact `site_info` / `live_status` keys instead of a prefix (a prefix could also drop another site whose id starts with the same digits).
+- Docs: the location filter deliberately drops ordinary words containing a long location stem, such as `relocation`, `dislocation` and `colocation` (safe default; only `allocation` is kept).
+- Changelog: headings for 0.6.0 and older no longer say unreleased.
+- Tool counts: 26 read-only, 67 with commands on, 71 with both opt-ins.
+
 ## 0.6.2
 
 Review follow-ups from 0.6.1 and a docs pointer. No new commands; tool counts unchanged.
@@ -18,7 +30,7 @@ Review follow-ups from 0.6.0 and a navigation check. No new commands; tool count
 - Docs: a valid PIN such as `2000` also masks ordinary numbers equal to it (for example `remote_boombox` sound id 2000) in command results and errors.
 - Location filtering for undocumented records (`get_wall_connector_charge_history` sessions): keys are split on separators and camelCase, so `coords`, `homeLatitude`, `homeLongitude`, `HomeLat`, `gpsLng`, `geoLocation` and similar are dropped at every depth, alongside the snake_case names already covered.
 
-## 0.6.0 (unreleased)
+## 0.6.0
 
 More commands and reads. Every new command is hidden unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed), previews without `confirm`, needs `user_request` with `confirm=true`, honours `TESLA_FLEET_DRY_RUN`, never wakes the car and is never retried. Request bodies follow the parameter names and enums the stock `tesla-http-proxy` reads (`pkg/proxy/command.go`); new read field names follow Tesla's Fleet Telemetry field list (`vehicle_data` equivalents).
 
@@ -35,7 +47,7 @@ More commands and reads. Every new command is hidden unless `TESLA_FLEET_READ_ON
 - Windows key ACL check (review nits from 0.5.1): `icacls` runs asynchronously (no 5 s stall of a preview) from `%SystemRoot%\System32` by full path; the PowerShell example uses `${env:USERNAME}`. The 0.5.1 changelog heading was already corrected.
 - Tool counts: 26 read-only, 66 with commands on, 70 with both opt-ins (one fewer each with location off, and one fewer each with NHTSA disabled).
 
-## 0.5.1 (unreleased)
+## 0.5.1
 
 Field results for `play_video_on_screen` and small fixes.
 
@@ -45,7 +57,7 @@ Field results for `play_video_on_screen` and small fixes.
 - VIN placeholder in docs, schema and tests is now 17 characters (`5YJ0000000EXAMPLE`).
 - Dependencies: `@types/node` 26.6.6.
 
-## 0.5.0 (unreleased)
+## 0.5.0
 
 Experimental `play_video_on_screen`.
 
@@ -56,7 +68,7 @@ Experimental `play_video_on_screen`.
 - `describe_boundary` shows an `experimental` block (key configured, allowlist size, audit on). Docs: `docs/EXPERIMENTAL-SIGNED-COMMANDS.md`.
 - Tool counts: 22 read-only, 49 with commands on (one fewer each with location off, and one fewer each with NHTSA disabled).
 
-## 0.4.0 (unreleased)
+## 0.4.0
 
 Ownership reads. All read-only, no confirm, never wake the car; nothing is hidden or unlocked by them, and the read-only switch still fails closed.
 
@@ -72,20 +84,20 @@ Ownership reads. All read-only, no confirm, never wake the car; nothing is hidde
 - Docs: `docs/TELEMETRY-FIELDS.md` lists the Fleet Telemetry fields and intervals the separate event bridge needs for ownership events, what Tesla does not expose, the `alert_types` caveat and an example `fleet_telemetry_config` body (placeholders; reference only, not pushed). README endpoint table adds NHTSA.
 - Tool counts: 22 read-only, 48 with commands on (one fewer each with location off, and one fewer each with NHTSA disabled).
 
-## 0.3.3 (unreleased)
+## 0.3.3
 
 - New, opt-in and **off by default**: `TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE`. When set to an absolute path, the MCP server (not the auth helper) refreshes once at startup and then about 10 minutes before each access-token expiry, and writes the raw token string there each time (no newline, no JSON, never the refresh token), atomically (temp `0600` + fsync + rename), with a missing parent directory created `0700`. The keep-fresh loop shares the server's single-flight refresh, store lock and auth rate limit, backs off 1/5/15 min on failure, stops on `login_required` (file left as is), and its timer is unref'd. The file stays fresh only while the server runs; after it stops the token expires within about 8 h.
 - Collision guard: a relative path (on Windows, anything but a drive-letter or UNC path), or one that resolves (symlinks followed; case-insensitive on Windows and macOS) to or inside the token store, its lock file or `usage.json`, or an existing target with the same device + inode, is refused with a warning, and the server keeps serving. Re-checked before every write. One safe warning if the parent directory is group- or world-writable. A failed write warns once and continues. The token and path are never logged or returned; `describe_boundary` shows `accessTokenExport: on/off`. Windows: best effort, no ACLs set.
 - Docs: a loud warning that the exported token carries all granted scopes (vehicle data, full-precision location regardless of the location settings, and `vehicle_cmds` / `energy_cmds` if granted; energy commands need no proxy signing), not to use `/tmp` or shared or synced folders, and to prefer a separate read-only sign-in for read-only consumers.
 
-## 0.3.2 (unreleased)
+## 0.3.2
 
 - Fix: no-op command reasons wrapped by tesla-http-proxy ("car could not execute command: already_set") are now recognised, so e.g. setting the charge limit to its current value reports `noChange` instead of a rejection. Reasons are normalised (prefix stripped, trimmed, lower-cased); the original text is kept in `rawReason`. The `vcsec could not execute command:` prefix is deliberately not stripped (stays a rejection).
 - No-op reasons are now scoped to their command: `already_set` (set_charge_limit, set_charging_amps), `is_charging` / `complete` / `requested` (charge_start), `not_charging` (charge_stop), `already_started` (charge_standard, charge_max_range), `already closed` (charge_port_door_close). Any other reason is a rejection. `disconnected` and `no_power` are no longer treated as no-ops: charge_start now reports them as rejections with friendly text.
 - Energy command TLS / connection failures name the Fleet API (`fleet_api_tls_error`, `fleet_api_unreachable`) and no longer point at the proxy CA variable.
 - Docs: full generic `tesla-http-proxy` walkthrough in the setup skill (pinned official image or release build, run as the uid:gid owning the key files, self-signed CA and SAN, loopback/LAN-only binding, health check, dry-run then fleet_status then flash_lights), and a README pointer noting the proxy has no client authentication.
 
-## 0.3.1 (unreleased)
+## 0.3.1
 
 - **Location is on by default** (the server runs for its owner). `get_location` is listed unless `TESLA_FLEET_ENABLE_LOCATION` is `0`/`false`/`no`/`off`; an unrecognised value turns location off with a warning. Coarse (~1 km) stays the default; new `TESLA_FLEET_DEFAULT_LOCATION_PRECISION` (`coarse`/`precise`). An invalid `precision` argument is refused before any network call (no token refresh or vehicle lookup).
 - `get_location` reports `missing_location_scope` with the fix when the token lacks `vehicle_location`.
@@ -95,7 +107,7 @@ Ownership reads. All read-only, no confirm, never wake the car; nothing is hidde
 - `TESLA_FLEET_PROXY_CA_FILE` is accepted as an alias for `TESLA_COMMAND_PROXY_CA_CERT` (used only when the primary name is unset).
 - Tool counts: 16 read-only, 42 with commands on (one fewer each with location off).
 
-## 0.3.0 (unreleased)
+## 0.3.0
 
 Command tools. Still read-only by default; every command stays hidden and refused unless `TESLA_FLEET_READ_ONLY` is explicitly off.
 
@@ -109,14 +121,14 @@ Command tools. Still read-only by default; every command stays hidden and refuse
 - `describe_boundary` shows the dry-run mode and climate defaults.
 - Tests for every command's request shape, confirm/read-only/dry-run gates, parameter validation before any network call, proxy failures, scope hints and redaction.
 
-## 0.2.2 (unreleased)
+## 0.2.2
 
 - CI also runs on Node 22.19.0 (the exact `engines` minimum) next to latest 22 and 24, on ubuntu and windows.
 - Bootstrap scripts warn (without failing) when Node is older than 22.19.
 - `not_configured` and `proxy_not_configured` messages mention the `TESLA_FLEET_*` aliases.
 - README: why `@types/node` stays at latest.
 
-## 0.2.1 (unreleased)
+## 0.2.1
 
 Dependency updates.
 
@@ -124,7 +136,7 @@ Dependency updates.
 - Node.js 22.19 or newer is now required (`engines` `>=22.19`; undici 8 needs it).
 - README: dependency policy (latest versions, majors when CI passes, pins only with a stated reason, bump `engines` with dependencies).
 
-## 0.2.0 (unreleased)
+## 0.2.0
 
 Energy-site reads (Powerwall / solar; Wall Connector via site live status). Read-only; no energy commands.
 
@@ -138,7 +150,7 @@ Energy-site reads (Powerwall / solar; Wall Connector via site live status). Read
 - Tool counts: 15 read-only (11 vehicle + 4 energy), 26 with commands on.
 - Manifests, MCP configs, README, skills and troubleshooting reference updated.
 
-## 0.1.2 (unreleased)
+## 0.1.2
 
 Fixes from the first read-only live test.
 
@@ -148,7 +160,7 @@ Fixes from the first read-only live test.
 - `get_closures` reports `windowsOpen` as unknown when the data source has no window fields (cached data often omits them) instead of an empty object.
 - Docs: PowerShell env loaders should run under PowerShell 7 (`pwsh`).
 
-## 0.1.1 (unreleased)
+## 0.1.1
 
 Review fixes.
 
@@ -158,7 +170,7 @@ Review fixes.
 - Bootstrap scripts and CI install with `npm ci --ignore-scripts`.
 - Dependabot: weekly updates for GitHub Actions and npm.
 
-## 0.1.0 (unreleased)
+## 0.1.0
 
 - First scaffold: one `vehicle-fleet` stdio MCP server, five skills, three manifests (Grok Build, Grok Bot/root, Cursor) and two MCP configs.
 - Read tools (cached-first, never wake), opt-in coarse location, confirm-gated command tools hidden unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed).

@@ -23,7 +23,42 @@ type EnergySpec = {
   properties: Record<string, unknown>;
   required?: string[];
   build: (a: ToolArgs) => Record<string, unknown>;
+  /**
+   * Optional send-time check, run only for a confirmed live send (never for previews or
+   * TESLA_FLEET_DRY_RUN). May throw LocalRefusal (nothing sent), return `skip` (a no-op
+   * result, nothing sent) or `note` (merged into the send result).
+   */
+  precheck?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext) => Promise<{ skip?: Record<string, unknown>; note?: Record<string, unknown> }>;
+  /** Extra billable reads made by `precheck`, shown in previews. */
+  extraReads?: string;
 };
+
+export const OFF_GRID_RESERVE_FIELD = "off_grid_vehicle_charging_reserve_percent";
+
+/**
+ * set_off_grid_vehicle_charging_reserve send-time check: one fresh site_info read.
+ * - components.off_grid_vehicle_charging_reserve_supported === false: refused (not_supported).
+ * - top-level off_grid_vehicle_charging_reserve_percent equal to the request: no-op, nothing sent.
+ * - read failed, or the value is absent/non-numeric: sent anyway (the user confirmed), marked precheck "unavailable".
+ */
+async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ctx: ToolContext) {
+  let data: Record<string, unknown>;
+  try {
+    data = (await ctx.fleet.energySiteInfo(siteId, true)).data;
+  } catch {
+    return { note: { precheck: "unavailable" } };
+  }
+  const comps = isObj(data.components) ? data.components : {};
+  if (comps.off_grid_vehicle_charging_reserve_supported === false) {
+    throw new LocalRefusal("not_supported", "This energy site reports off-grid vehicle charging reserve as unsupported; nothing was sent.");
+  }
+  const current = data[OFF_GRID_RESERVE_FIELD];
+  if (typeof current !== "number" || !Number.isFinite(current)) return { note: { precheck: "unavailable" } };
+  if (current === body[OFF_GRID_RESERVE_FIELD]) {
+    return { skip: { ok: true, sent: false, noop: true, [OFF_GRID_RESERVE_FIELD]: current, message: "Already set to this value; nothing was sent." } };
+  }
+  return { note: { precheck: "ok", previous: current } };
+}
 
 const SPECS: EnergySpec[] = [
   {
@@ -32,6 +67,15 @@ const SPECS: EnergySpec[] = [
     properties: { backup_reserve_percent: { type: "integer", minimum: 0, maximum: 100 } },
     required: ["backup_reserve_percent"],
     build: (a) => ({ backup_reserve_percent: int(a.backup_reserve_percent, "backup_reserve_percent", 0, 100) }),
+  },
+  {
+    name: "set_off_grid_vehicle_charging_reserve", path: "off_grid_vehicle_charging_reserve",
+    description: "Set the Powerwall off-grid vehicle charging reserve percent (0-100): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop).",
+    properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: 0, maximum: 100 } },
+    required: [OFF_GRID_RESERVE_FIELD],
+    build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, 0, 100) }),
+    precheck: offGridPrecheck,
+    extraReads: "1 site_info read",
   },
   {
     name: "set_operation_mode", path: "operation",
@@ -147,7 +191,7 @@ function energyTool(spec: EnergySpec): ToolDef {
       if (args.confirm !== true) {
         return {
           dryRun: true, sent: false, command: spec.name, endpoint, body,
-          estimatedBillableCalls: "1 command (+1 product list if no site id is set)",
+          estimatedBillableCalls: `1 command${spec.extraReads ? ` + ${spec.extraReads}` : ""} (+1 product list if no site id is set)`,
           toSend: "Ask the user to confirm, then call again with confirm=true and user_request.",
         };
       }
@@ -161,12 +205,18 @@ function energyTool(spec: EnergySpec): ToolDef {
         };
       }
       const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id);
+      let note: Record<string, unknown> = {};
+      if (spec.precheck) {
+        const pre = await spec.precheck(siteId, body, ctx);
+        if (pre.skip) return { command: spec.name, ...pre.skip };
+        note = pre.note ?? {};
+      }
       try {
         const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
         const outcome = interpretEnergyResponse(raw);
         const rawShape = rawShapeOf(raw);
-        if (outcome.ok) return { ok: true, sent: true, command: spec.name, result: outcome.result, rawShape, readBackWith: "get_energy_site_info" };
-        return { ok: false, command: spec.name, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
+        if (outcome.ok) return { ok: true, sent: true, command: spec.name, ...note, result: outcome.result, rawShape, readBackWith: "get_energy_site_info" };
+        return { ok: false, command: spec.name, ...note, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
       } catch (e) {
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });

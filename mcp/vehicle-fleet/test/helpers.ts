@@ -27,7 +27,7 @@ export const VEHICLE_COMMANDS = [
   "media_toggle_playback", "media_next_track", "media_prev_track", "media_next_fav", "media_prev_fav",
   "media_volume_up", "media_volume_down", "adjust_volume",
 ];
-export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set_storm_mode", "set_grid_import_export"];
+export const ENERGY_COMMANDS = ["set_backup_reserve", "set_operation_mode", "set_storm_mode", "set_grid_import_export", "set_off_grid_vehicle_charging_reserve"];
 /** EXPERIMENTAL command tools (signed locally, see src/signed). */
 export const EXPERIMENTAL_COMMANDS = ["play_video_on_screen"];
 export const COMMANDS = [...VEHICLE_COMMANDS, ...ENERGY_COMMANDS, ...EXPERIMENTAL_COMMANDS];
