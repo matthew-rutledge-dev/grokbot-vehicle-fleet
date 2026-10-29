@@ -9,7 +9,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { encodeBoomboxAction, encodeDashcamSaveClipAction } from "../src/signed/messages.js";
-import { isParked } from "../src/tools/commands.js";
+import { parkCheck } from "../src/tools/commands.js";
+import { dropLocation } from "../src/tools/energy.js";
+import { redactShortSecrets } from "../src/redact.js";
 import { daysOf, hhmm } from "../src/tools/extract.js";
 import { FakeVehicle } from "./fake-vehicle.js";
 import {
@@ -120,15 +122,41 @@ test("share_navigation lat/lon: navigation_request (proxy forwards it), text lat
   assert.ok(!calls.some((x) => x.url.includes("navigation_gps_request")));
 });
 
+test("share_navigation: destination and lat/lon together are refused (no silent preference), nothing sent", async () => {
+  const { ctx, calls } = setup(baseEnv(ON), cmd("navigation_request"));
+  const c = await connect(ctx);
+  for (const extra of [{ lat: 1.5, lon: 2.5 }, { lat: 1.5 }, { lon: 2.5 }]) {
+    const b = body(await c.callTool({ name: "share_navigation", arguments: { destination: "Example Place", ...extra, ...intent } }));
+    assert.equal(b.code, "invalid_arguments", JSON.stringify(extra));
+    assert.ok(!JSON.stringify(b).includes("Example Place"));
+  }
+  assert.equal(calls.length, 0);
+});
+
 // ---------- window vent gear check ----------
 
-test("isParked: P; or no gear and not moving; anything else is not parked", () => {
-  assert.equal(isParked({ shift_state: "P" }), true);
-  assert.equal(isParked({ shift_state: null }), true);
-  assert.equal(isParked({ shift_state: null, speed: 0 }), true);
-  assert.equal(isParked({}), true);
-  assert.equal(isParked({ shift_state: null, speed: 12 }), false);
-  for (const g of ["D", "R", "N", "SNA", "Invalid"]) assert.equal(isParked({ shift_state: g }), false, g);
+test("parkCheck: parked only for P, or explicit null gear with speed 0/null and drive_state present", () => {
+  // allowed
+  assert.equal(parkCheck({ drive_state: { shift_state: "P" } }), "parked");
+  assert.equal(parkCheck({ drive_state: { shift_state: "P", speed: null } }), "parked");
+  assert.equal(parkCheck({ drive_state: { shift_state: null, speed: 0 } }), "parked");
+  assert.equal(parkCheck({ drive_state: { shift_state: null, speed: null } }), "parked");
+  // the six fail-open cases from review: all gear_unknown now
+  assert.equal(parkCheck({}), "gear_unknown", "response {}");
+  assert.equal(parkCheck(null), "gear_unknown", "response null");
+  assert.equal(parkCheck({ state: "online" }), "gear_unknown", "drive_state missing");
+  assert.equal(parkCheck({ drive_state: {} }), "gear_unknown", "drive_state {}");
+  assert.equal(parkCheck({ drive_state: null }), "gear_unknown", "drive_state null");
+  assert.equal(parkCheck({ drive_state: { shift_state: null } }), "gear_unknown", "null gear, no speed");
+  // other unknowns
+  assert.equal(parkCheck({ drive_state: { speed: 0 } }), "gear_unknown", "no shift_state key");
+  assert.equal(parkCheck({ drive_state: { shift_state: "" } }), "gear_unknown");
+  assert.equal(parkCheck({ drive_state: { shift_state: null, speed: "0" } }), "gear_unknown");
+  assert.equal(parkCheck({ drive_state: [] }), "gear_unknown");
+  assert.equal(parkCheck([]), "gear_unknown");
+  // moving / in gear
+  assert.equal(parkCheck({ drive_state: { shift_state: null, speed: 12 } }), "not_parked");
+  for (const g of ["D", "R", "N", "SNA", "Invalid"]) assert.equal(parkCheck({ drive_state: { shift_state: g } }), "not_parked", g);
 });
 
 test("window_control vent: sent only when parked; refused (nothing sent) when driving or the gear can't be read", async () => {
@@ -148,9 +176,27 @@ test("window_control vent: sent only when parked; refused (nothing sent) when dr
     assert.equal(r.b.code, "not_parked", JSON.stringify(ds));
     assert.equal(cmdCalls(r.calls).length, 0);
   }
+  const parkedZero = await run(liveData({ drive_state: { shift_state: null, speed: 0 } }));
+  assert.equal(parkedZero.b.ok, true);
   const err = await run(() => ({ status: 500, body: { error: "boom" } }));
   assert.equal(err.b.code, "gear_unknown");
   assert.equal(cmdCalls(err.calls).length, 0);
+  // fail closed: no usable gear in the live read -> gear_unknown, nothing sent
+  const raw = (response: unknown): Route => () => ({ status: 200, body: { response } });
+  const unknowns: Array<[string, Route]> = [
+    ["drive_state missing", raw({ state: "online" })],
+    ["drive_state {}", raw({ state: "online", drive_state: {} })],
+    ["drive_state null", raw({ state: "online", drive_state: null })],
+    ["shift_state null, no speed", raw({ state: "online", drive_state: { shift_state: null } })],
+    ["response {}", raw({})],
+    ["response null", raw(null)],
+  ];
+  for (const [label, route] of unknowns) {
+    const r = await run(route);
+    assert.equal(r.b.ok, false, label);
+    assert.equal(r.b.code, "gear_unknown", label);
+    assert.equal(cmdCalls(r.calls).length, 0, label);
+  }
   // vent without an explicit vin is refused
   const { ctx } = setup(baseEnv(ON));
   const nv = body(await (await connect(ctx)).callTool({ name: "window_control", arguments: { command: "vent", ...intent } }));
@@ -301,15 +347,41 @@ test("set_valet_mode: rejection and error replies never carry the PIN; off sends
   assert.ok(!JSON.stringify(body(e)).includes(PIN));
 });
 
+test("set_valet_mode: an upstream 400 body or a result:false reason that echoes the request never leaks the PIN", async () => {
+  const echoes: Array<[string, Route]> = [
+    ["400 echo", (call) => ({ status: 400, body: { error: `invalid request: ${call.body}`, error_description: `password ${PIN} rejected`, pin: Number(PIN) } })],
+    ["result:false echo", (call) => ({ status: 200, body: { response: { result: false, reason: `bad password ${PIN}; request was ${call.body}` } } })],
+    ["result:false bare", () => ({ status: 200, body: { response: { result: false, reason: PIN } } })],
+    ["422 echo", () => ({ status: 422, body: { error: `password=${PIN}` } })],
+  ];
+  for (const [label, route] of echoes) {
+    const { ctx, calls } = setup(baseEnv(VALET_ON), cmd("set_valet_mode", route));
+    const res = await (await connect(ctx)).callTool({ name: "set_valet_mode", arguments: { on: true, vin: VIN, ...intent } });
+    const b = body(res);
+    assert.equal(b.ok, false, label);
+    assert.equal(cmdCalls(calls).length, 1, `${label}: sent once`);
+    assert.deepEqual(sentBody(cmdCalls(calls)[0]), { on: true, password: PIN });
+    assert.ok(!JSON.stringify(res).includes(PIN), `${label}: PIN not in result: ${JSON.stringify(res)}`);
+    assert.match(JSON.stringify(b), /\[redacted\]/, label);
+  }
+});
+
+test("redactShortSecrets: only digit-bounded matches, numbers equal to the secret, keys; JSON-safe", () => {
+  const out = redactShortSecrets({ a: "pin 7391 x", b: 7391, c: "173910 and 73911", d: [{ "7391": "ok" }], e: 7392, f: true }, ["7391"]);
+  assert.deepEqual(out, { a: "pin [redacted] x", b: "[redacted]", c: "173910 and 73911", d: [{ "[redacted]": "ok" }], e: 7392, f: true });
+  assert.deepEqual(redactShortSecrets({ a: "7391" }, [undefined]), { a: "7391" });
+});
+
 test("set_valet_mode: PIN never accepted as an argument; missing or malformed env PIN refused without echo; explicit vin required", async () => {
   {
     const { ctx, calls } = setup(baseEnv(VALET_ON));
     const c = await connect(ctx);
-    for (const k of ["pin", "password", "valet_pin"]) {
+    for (const k of ["pin", "password", "valet_pin", "PIN", "Password", "PASSWORD", "valetPin", "Valet-Pin", "passcode"]) {
       const b = body(await c.callTool({ name: "set_valet_mode", arguments: { on: true, vin: VIN, [k]: "1234", ...intent } }));
       assert.equal(b.code, "invalid_arguments", k);
       assert.ok(!JSON.stringify(b).includes("1234"));
     }
+    assert.equal(cmdCalls(calls).length, 0);
     const nv = body(await c.callTool({ name: "set_valet_mode", arguments: { on: true, ...intent } }));
     assert.equal(nv.ok, false);
     assert.equal(cmdCalls(calls).length, 0);
@@ -481,6 +553,16 @@ test("daysOf / hhmm reject junk", () => {
   assert.equal(hhmm(0), "00:00");
 });
 
+test("dropLocation strips location keys at every depth (objects and arrays)", () => {
+  const out = dropLocation({
+    energy_added_wh: 1, latitude: 1.1, site: { name: "x", location: { lat: 2.2, lon: 3.3 }, gps_lat: 4.4, nested: [{ longitude: 5.5, ok: 1 }] },
+    list: [{ lat: 6.6, v: 2 }], vehicle: { last_location: "y", coordinates: [7.7, 8.8], vin_hash: "z" },
+  });
+  const j = JSON.stringify(out);
+  for (const v of ["1.1", "2.2", "3.3", "4.4", "5.5", "6.6", "7.7", "8.8", "last_location", "coordinates"]) assert.ok(!j.includes(v), v);
+  assert.deepEqual(out, { energy_added_wh: 1, site: { name: "x", nested: [{ ok: 1 }] }, list: [{ v: 2 }], vehicle: { vin_hash: "z" } });
+});
+
 test("get_wall_connector_charge_history: telemetry_history kind=charge, bounded range, location fields dropped", async () => {
   const SITE = "1234567890";
   let seen = "";
@@ -489,7 +571,7 @@ test("get_wall_connector_charge_history: telemetry_history kind=charge, bounded 
       seen = call.url;
       return { status: 200, body: { response: { charge_history: [
         { charging_start_time: { seconds: 1 }, energy_added_wh: 5000, latitude: 1.23456 },
-        { charging_start_time: { seconds: 2 }, energy_added_wh: 2500.4, gps_location: "x" },
+        { charging_start_time: { seconds: 2 }, energy_added_wh: 2500.4, gps_location: "x", vehicle: { location: { latitude: 9.87654 } } },
       ] } } };
     },
   });
@@ -499,6 +581,7 @@ test("get_wall_connector_charge_history: telemetry_history kind=charge, bounded 
   assert.equal(b.totalEnergyAddedWh, 7500);
   assert.ok(!JSON.stringify(b).includes("1.23456"));
   assert.ok(!JSON.stringify(b).includes("gps_location"));
+  assert.ok(!JSON.stringify(b).includes("9.87654"), "nested location dropped");
   const u = new URL(seen);
   assert.equal(u.searchParams.get("kind"), "charge");
   assert.equal(u.searchParams.get("period"), null);

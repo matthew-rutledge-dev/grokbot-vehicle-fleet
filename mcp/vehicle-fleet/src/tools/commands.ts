@@ -127,15 +127,30 @@ export const AUTO_SEAT: Record<string, number> = { driver: 1, passenger: 2 };
 export const MIN_VOLUME = 0;
 export const MAX_VOLUME = 10;
 
-/** Gear check for vent: P, or no gear reported and not moving. */
-export function isParked(d: Record<string, unknown>): boolean {
+/**
+ * Gear check for vent (fails closed). "parked" only when drive_state is present and either
+ * shift_state === "P", or shift_state is explicitly null AND speed is 0 or null (a parked car
+ * often reports no gear). A missing/empty/null drive_state, a missing shift_state, or null gear
+ * without a speed field is "gear_unknown"; a gear other than P, or null gear with a non-zero speed,
+ * is "not_parked".
+ */
+export type ParkCheck = "parked" | "not_parked" | "gear_unknown";
+export function parkCheck(data: unknown): ParkCheck {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "gear_unknown";
+  const ds = (data as Record<string, unknown>).drive_state;
+  if (!ds || typeof ds !== "object" || Array.isArray(ds)) return "gear_unknown";
+  const d = ds as Record<string, unknown>;
+  if (!("shift_state" in d)) return "gear_unknown";
   const g = d.shift_state;
-  if (g === "P") return true;
-  if (g === null || g === undefined || g === "") {
-    const speed = d.speed;
-    return speed === null || speed === undefined || speed === 0;
+  if (g === "P") return "parked";
+  if (g === null) {
+    if (!("speed" in d)) return "gear_unknown";
+    if (d.speed === 0 || d.speed === null) return "parked";
+    if (typeof d.speed === "number" && Number.isFinite(d.speed)) return "not_parked";
+    return "gear_unknown";
   }
-  return false;
+  if (typeof g === "string" && g !== "") return "not_parked";
+  return "gear_unknown";
 }
 
 /** One live vehicle_data read for a send-time check; any failure refuses (fails closed). */
@@ -286,7 +301,7 @@ const SPECS: CommandSpec[] = [
   },
   {
     name: "share_navigation", endpoint: "navigation_request", scope: "vehicle_cmds", readBack: "get_vehicle_state",
-    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon. Both go through navigation_request (the share endpoint the stock proxy forwards to the Fleet API); coordinates are shared as the text \"lat,lon\" for the car's navigation to resolve.",
+    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon. Both go through navigation_request (the share endpoint the stock proxy forwards to the Fleet API); coordinates are shared as the text \"lat,lon\" for the car's navigation to resolve (not field-tested yet: ask the person whether the car showed the place). Pass one or the other; both is refused.",
     properties: {
       destination: { type: "string", description: "Address or place name." },
       lat: { type: "number", description: "Latitude (-90 to 90). Pass with lon instead of destination." },
@@ -295,7 +310,9 @@ const SPECS: CommandSpec[] = [
     build: (a) => {
       let text: string;
       let shown: string;
-      if (a.lat !== undefined || a.lon !== undefined) {
+      const hasCoords = a.lat !== undefined || a.lon !== undefined;
+      if (hasCoords && a.destination !== undefined) bad("pass either destination text or lat+lon, not both");
+      if (hasCoords) {
         const { lat, lon } = coords(a);
         text = `${round6(lat)},${round6(lon)}`;
         shown = "[coordinates, not echoed]";
@@ -352,7 +369,7 @@ const SPECS: CommandSpec[] = [
     description: "Vent (open a crack) or close all windows. Needs an explicit vin. vent is refused unless a live read shows the car in Park (shift_state P, or no gear reported and not moving); if the gear cannot be read, vent is refused. close has no pre-check.",
     properties: { command: { type: "string", enum: ["vent", "close"] } },
     required: ["command"],
-    extraChecks: ["vent only: live drive_state shift_state must be P or empty and not moving (1 data read)"],
+    extraChecks: ["vent only: live drive_state shift_state must be P, or explicitly null with speed 0/null; anything else is refused (1 data read)"],
     build: (a) => {
       if (a.command !== "vent" && a.command !== "close") bad("command must be vent or close");
       return { body: { command: a.command } };
@@ -360,8 +377,13 @@ const SPECS: CommandSpec[] = [
     sendPlan: async (a, vin, ctx, built) => {
       if (a.command !== "vent") return built;
       const data = await liveOrRefuse(ctx, vin, ["drive_state"], "gear_unknown", "Could not read the gear, so vent was not sent");
-      const d = (data.drive_state ?? {}) as Record<string, unknown>;
-      if (!isParked(d)) {
+      const check = parkCheck(data);
+      if (check === "gear_unknown") {
+        throw new LocalRefusal("gear_unknown", "Could not confirm the car is in Park (no gear reported), so vent was not sent; nothing was sent.",
+          "Venting is only sent when a live read shows the car in Park.");
+      }
+      if (check === "not_parked") {
+        const d = (data as Record<string, unknown>).drive_state as Record<string, unknown>;
         throw new LocalRefusal("not_parked", "The car is not in Park, so the windows were not vented; nothing was sent.",
           "Venting is only sent while the car is parked.", { shift_state: d.shift_state ?? null });
       }

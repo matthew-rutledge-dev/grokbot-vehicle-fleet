@@ -10,7 +10,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 ## Quick map
 
 - Page or video on the screen: `play_video_on_screen` (EXPERIMENTAL). `https` public hosts only; unlisted hosts need a named approval and `allow_unlisted_host=true`. It opens the link but does not press play; video needs Park. After `ok: true`, ask what the screen shows; if nothing, ask them to open the browser (hint from one field test, not guaranteed: later links can load in the background without coming to the front). Never send a URL that carries a token or other secret.
-- Navigation: `share_navigation` (destination text or lat+lon). Not for web links.
+- Navigation: `share_navigation` (destination text or lat+lon, not both). Not for web links. Coordinates as `lat,lon` text are not field-tested yet: ask whether the car showed the place.
 - Climate: `climate_warm_up`, `climate_start` / `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`, `set_cop_temp` (low/medium/high), `set_climate_keeper_mode` (off/on/dog/camp), `set_auto_seat_climate`.
 - Garage: `trigger_homelink` only when the person asks right now (omit lat/lon to use the car's location); refused unless the car sees a HomeLink device nearby. Never automate it.
 - Windows: `window_control` (`vent` only in Park, or `close`; explicit vin). Never automate it.

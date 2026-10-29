@@ -31,9 +31,14 @@ export function valetPin(ctx: ToolContext): string {
   return pin;
 }
 
+const PIN_ARG_NAMES = new Set(["pin", "password", "valetpin", "passcode", "passwd", "pincode", "valetpassword"]);
+
 function refusePinArg(args: ToolArgs): void {
-  for (const k of ["pin", "password", "valet_pin"]) {
-    if (k in args) bad(`${k} is not accepted as an argument (the PIN comes only from TESLA_FLEET_VALET_PIN)`);
+  // Case- and separator-insensitive: PIN, Password, valet-pin, valetPin, pass_code ...
+  for (const k of Object.keys(args)) {
+    if (PIN_ARG_NAMES.has(k.toLowerCase().replace(/[^a-z]/g, ""))) {
+      bad("a PIN or password argument is not accepted (the PIN comes only from TESLA_FLEET_VALET_PIN)");
+    }
   }
 }
 

@@ -134,9 +134,20 @@ export function buildHistoryQuery(args: ToolArgs, now: Date = new Date()): Histo
 const SERIES_CAP = 400;
 const SESSIONS_CAP = 100;
 
-/** Drop location-looking keys from an undocumented record (top level). */
-function dropLocation(e: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(e).filter(([k]) => !/(^|_)(lat|lon|lng|latitude|longitude|location|gps)($|_)/i.test(k)));
+const LOCATION_KEY = /(^|_)(lat|lon|lng|latitude|longitude|location|gps|coordinates?|address)($|_)/i;
+/** Drop location-looking keys from an undocumented record, at every depth (objects and arrays). */
+export function dropLocation(e: Record<string, unknown>): Record<string, unknown> {
+  return dropLocationDeep(e, 0) as Record<string, unknown>;
+}
+function dropLocationDeep(v: unknown, depth: number): unknown {
+  if (depth > 8) return undefined;
+  if (Array.isArray(v)) return v.map((x) => dropLocationDeep(x, depth + 1));
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>)
+      .filter(([k]) => !LOCATION_KEY.test(k))
+      .map(([k, x]) => [k, dropLocationDeep(x, depth + 1)]));
+  }
+  return v;
 }
 const EVENTS_CAP = 100;
 
@@ -263,7 +274,7 @@ export const ENERGY_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "get_wall_connector_charge_history",
-      description: `Wall Connector charging sessions for a bounded date range (at most 31 days; dates YYYY-MM-DD in time_zone, default UTC; default range: today): count, total energy added (Wh) and, with include_sessions=true, the sessions (capped at ${SESSIONS_CAP}). Tesla does not document the session fields, so known numeric energy fields are summed and other fields are passed through (location fields dropped). One billable data call (cached 5 min). Needs ${ENERGY_SCOPE}.`,
+      description: `Wall Connector charging sessions for a bounded date range (at most 31 days; dates YYYY-MM-DD in time_zone, default UTC; default range: today): count, total energy added (Wh) and, with include_sessions=true, the sessions (capped at ${SESSIONS_CAP}). Tesla does not document the session fields, so known numeric energy fields are summed and other fields are passed through (location-like keys dropped at every depth). One billable data call (cached 5 min). Needs ${ENERGY_SCOPE}.`,
       inputSchema: {
         type: "object",
         properties: {
