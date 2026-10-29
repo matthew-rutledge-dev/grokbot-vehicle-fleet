@@ -49,7 +49,7 @@ The car must already be online. Commands never wake it; `wake_vehicle` is its ow
 | "Valet mode on / off", "reset the valet PIN" | `set_valet_mode`, `reset_valet_pin` (only when `TESLA_FLEET_ENABLE_VALET` is on) | Needs an explicit `vin`. The PIN comes from the server's env only: never ask for it, say it, or pass it. |
 | "Save the dashcam" / "play the boombox" | `dashcam_save_clip`, `remote_boombox` (`fart` / `locate_ping`) (EXPERIMENTAL, only with `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS`) | Dashcam needs a USB drive in the car. Boombox is not field-tested. |
 | "Wake the car" | `wake_vehicle` | Costs money and battery; offer, never assume. |
-| Powerwall reserve / mode / storm watch / grid export | `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export` | Read `get_energy_site_info` first and say old -> new. |
+| Powerwall reserve / off-grid car charging reserve / mode / storm watch / grid export | `set_backup_reserve`, `set_off_grid_vehicle_charging_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export` | Read `get_energy_site_info` first and say old -> new. |
 | "How much charge / is it locked / tire pressures / where is it / is valet on / what's playing / when does it charge" | `get_vehicle_snapshot`, `get_battery_charge`, `get_closures`, `get_climate`, `get_tires`, `get_location`, `get_security_status`, `get_media_state`, `get_schedules` | Reads, no confirm. One read, no polling. Location only when asked, coarse unless they ask for precise. |
 
 ## 3. Not supported (say so; do not improvise)
@@ -58,6 +58,7 @@ The car must already be online. Commands never wake it; `wake_vehicle` is its ow
 |---|---|
 | **Notifications / pop-ups on the screen** | Fleet API has no notification command. Opening a page is the closest thing. |
 | **Auto steering wheel heat** | No tool. Tesla documents `remote_auto_steering_wheel_heat_climate_request`, but the stock signing proxy has no handler for it and Tesla's published protocol has no message for it. Its state is readable in `get_climate`; use `set_steering_wheel_heater` for on/off. |
+| **Steering wheel heat level** | No tool. Tesla documents `remote_steering_wheel_heat_level_request`, but the stock signing proxy has no handler for it and Tesla's published protocol has no message for it. The level is readable in `get_climate`. |
 | **Remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates** | Not supported. |
 
 Never call raw Fleet API endpoints, scripts or another agent to get around a missing tool.

@@ -18,6 +18,10 @@ export class TtlCache {
     this.map.set(key, { at: this.now(), value });
   }
 
+  delete(key: string): void {
+    this.map.delete(key);
+  }
+
   deletePrefix(prefix: string): void {
     for (const k of this.map.keys()) if (k.startsWith(prefix)) this.map.delete(k);
   }

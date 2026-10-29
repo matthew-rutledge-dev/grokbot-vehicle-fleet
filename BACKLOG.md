@@ -4,14 +4,14 @@ No secrets in this file.
 
 ## TODO
 
-- Off-grid vehicle charging reserve (energy command; other energy settings commands shipped in 0.3.0).
 - Pin the seat heater body field names and seat numbering against the current proxy (0.3.0 sends both documented key sets).
-- Steering wheel heat level (`set_steering_wheel_heat_level`) next to on/off.
+- Steering wheel heat level (`set_steering_wheel_heat_level`): skipped in 0.7.0. Tesla's docs list `remote_steering_wheel_heat_level_request` with `level` 0 = off, 1 = low, 3 = high (no 2). The stock `tesla-http-proxy` has no handler (`invalid_command`); Tesla's published protos have no action for it, only the `StwHeatLevel` state enum (0 unknown, 1 off, 2 low, 3 high), which numbers levels differently (the same off-by-one risk as `set_cop_temp`). Add only if the stock proxy or Tesla's published protos gain it; then pin the level mapping per path and never send it from climate defaults or warm-up.
 - Pin energy `live_status` / `site_info` / `calendar_history` field names against a redacted real response; add fixtures.
 - Pin `vehicle_data_cached` and TPMS field names/units against a redacted real response; add it as a fixture.
 - Confirm the pricing category of `GET /api/1/vehicles/{vin}` and `fleet_status` and adjust the dry-run cost estimate and the `other` bucket of `get_api_usage`.
 - Verify the `navigation_request` body shape against the current proxy.
-- Field-test (0.6.0; 0.6.1 and 0.6.2 add no new commands): `share_navigation` with `lat`/`lon` (sent as `lat,lon` text via `navigation_request`), `trigger_homelink`, `window_control`, the media commands, `set_cop_temp` level mapping on a signed-command car, `set_climate_keeper_mode`, `set_auto_seat_climate`, valet on/off/reset, `remote_boombox`. Pin the `telemetry_history?kind=charge` session fields against a redacted real response.
+- Field-test (0.7.0): `set_off_grid_vehicle_charging_reserve` (body, the `noop` pre-read, and whether `site_info` returns `off_grid_vehicle_charging_reserve_percent`).
+- Field-test (0.6.x: 0.6.0 commands; 0.6.1 and 0.6.2 add no new commands): `share_navigation` with `lat`/`lon` (sent as `lat,lon` text via `navigation_request`), `trigger_homelink`, `window_control`, the media commands, `set_cop_temp` level mapping on a signed-command car, `set_climate_keeper_mode`, `set_auto_seat_climate`, valet on/off/reset, `remote_boombox`. Pin the `telemetry_history?kind=charge` session fields against a redacted real response.
 - Navigation to a Supercharger by id (`navigation_sc_request`) and multi-stop routes (`navigation_waypoints_request`): skipped in 0.6.1. Tesla's docs list both but publish no parameters; the stock `tesla-http-proxy` answers `invalid_command` (no handler, same as `navigation_gps_request`; only `navigation_request` is forwarded); Tesla's published protos have no action for either. The only signed encodings are reverse-engineered third-party extensions (Supercharger id + trip-order enum; waypoints as one text field of place references, format unverified). Add only if the stock proxy or Tesla's published protos gain them, or Tesla documents the request body; then validate ids/place references strictly and cap the stop count.
 - Auto steering wheel heat (`remote_auto_steering_wheel_heat_climate_request`): add only if the stock proxy or Tesla's published protos gain it.
 - Fleet Telemetry (separate project; needs a public server).

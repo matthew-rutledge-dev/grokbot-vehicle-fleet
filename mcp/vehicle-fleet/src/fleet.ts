@@ -348,10 +348,16 @@ export class FleetClient {
   async energyCommand(siteId: string, path: string, body: Record<string, unknown>): Promise<unknown> {
     this.limiter.take("command", `site:${siteId}`);
     const base = await this.resolveBaseUrl();
-    const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
-    this.cache.deletePrefix(`energy_info:${siteId}`);
-    this.cache.deletePrefix(`energy_live:${siteId}`);
-    return res.body;
+    try {
+      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
+      return res.body;
+    } finally {
+      // Always, even when the POST throws (5xx, timeout, dropped connection): the outcome may be
+      // unknown, so a read-back must hit the network, not a value cached before the send.
+      // Exact keys: a prefix delete would also drop another site whose id starts with this one.
+      this.cache.delete(`energy_info:${siteId}`);
+      this.cache.delete(`energy_live:${siteId}`);
+    }
   }
 
   /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */
@@ -359,8 +365,9 @@ export class FleetClient {
     return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");
   }
 
-  /** GET /energy_sites/{id}/site_info (cached 10 min). */
-  energySiteInfo(siteId: string) {
+  /** GET /energy_sites/{id}/site_info (cached 10 min; fresh=true skips the cache, for send-time checks). */
+  energySiteInfo(siteId: string, fresh = false) {
+    if (fresh) this.cache.delete(`energy_info:${siteId}`);
     return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info");
   }
 

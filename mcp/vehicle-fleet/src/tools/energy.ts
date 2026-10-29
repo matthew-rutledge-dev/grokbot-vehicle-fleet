@@ -35,7 +35,7 @@ export const WALL_CONNECTOR_FIELDS = [
 export const SITE_INFO_FIELDS = [
   "site_name", "backup_reserve_percent", "default_real_mode", "installation_date", "installation_time_zone",
   "version", "battery_count", "nameplate_power", "nameplate_energy", "max_site_meter_power_ac",
-  "min_site_meter_power_ac", "vpp_backup_reserve_percent",
+  "min_site_meter_power_ac", "vpp_backup_reserve_percent", "off_grid_vehicle_charging_reserve_percent",
 ] as const;
 
 export const SITE_COMPONENT_FIELDS = [
@@ -240,7 +240,7 @@ export const ENERGY_TOOLS: ToolDef[] = [
     kind: "read",
     tool: {
       name: "get_energy_site_info",
-      description: `Site configuration: backup reserve %, operation mode, storm watch enabled, export rule, grid charging, battery count, nameplate power/energy, firmware, installation time zone. One billable data call (cached 10 min). Needs ${ENERGY_SCOPE}. Read-only (changing settings is not supported).`,
+      description: `Site configuration: backup reserve %, off-grid vehicle charging reserve % (when the site reports it), operation mode, storm watch enabled, export rule, grid charging, battery count, nameplate power/energy, firmware, installation time zone. One billable data call (cached 10 min). Needs ${ENERGY_SCOPE}. Read-only; settings are changed only by the confirm-gated energy commands.`,
       inputSchema: { type: "object", properties: { ...SITE_PROP } },
     },
     handler: siteHandler(async (siteId, _a, ctx) => {

@@ -19,12 +19,12 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 - Experimental (only if listed): `dashcam_save_clip`, `remote_boombox` (`fart` / `locate_ping`).
 - Security: `door_lock`, `door_unlock` (explicit vin), `actuate_trunk` (explicit vin; frunk usually cannot close remotely), `set_sentry_mode`, `flash_lights`, `honk_horn`.
 - Charging: `charge_start` / `charge_stop`, `set_charge_limit`, `set_charging_amps`, `charge_port_door_open` / `_close`.
-- Powerwall: read `get_energy_site_info`, then `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export`.
+- Powerwall: read `get_energy_site_info`, then `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export`, `set_off_grid_vehicle_charging_reserve`.
 - Questions about the car: one read (`get_vehicle_snapshot` or a section tool); location only when asked.
 
 ## Not supported here (say so, do not improvise)
 
-Screen notifications or pop-ups, Supercharger-by-id navigation or multi-stop routes, auto steering wheel heat, remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates; valet or dashcam/boombox when those tools are not listed (operator opt-in). Never reach for raw endpoints, scripts or another agent instead.
+Screen notifications or pop-ups, Supercharger-by-id navigation or multi-stop routes, auto steering wheel heat, steering wheel heat level, remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates; valet or dashcam/boombox when those tools are not listed (operator opt-in). Never reach for raw endpoints, scripts or another agent instead.
 
 ## Never
 
