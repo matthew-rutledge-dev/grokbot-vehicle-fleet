@@ -1,6 +1,14 @@
 # Changelog
 
-## 0.6.1 (unreleased)
+## 0.6.2
+
+Review follow-ups from 0.6.1 and a docs pointer. No new commands; tool counts unchanged.
+
+- Location filtering for undocumented records (`get_wall_connector_charge_history` sessions): trailing digits are stripped from each key word (`lat1`, `lon2`, `longitude2`), run-together pairs (`latlng`, `latlon`, `lnglat`, `lonlat`) are location words, and each word is also checked for the long stems `latitude`, `longitude`, `location` and `coordinate` as substrings (`homelatitude`, `sitelocation`, `gpscoordinates`). Short stems (`lat`, `lon`, `lng`, `geo`) are still matched only as whole words, so `translation`, `platform`, `salon`, `flatness` and `latency_ms` are kept; `allocation` is kept explicitly.
+- Docs: the event-bridge section (README, `docs/TELEMETRY-FIELDS.md`, setup skill) now names `grok-bot-universal-bridge`'s Tesla adapter as the reference event bridge; any compatible bridge still works, and the plugin still neither ships nor starts it.
+- Changelog: the 0.6.1 heading no longer says unreleased.
+
+## 0.6.1
 
 Review follow-ups from 0.6.0 and a navigation check. No new commands; tool counts unchanged.
 

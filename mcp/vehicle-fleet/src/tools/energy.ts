@@ -137,10 +137,21 @@ const SESSIONS_CAP = 100;
 const LOCATION_WORDS = new Set([
   "lat", "lon", "lng", "latitude", "longitude", "location", "gps", "geo", "geolocation",
   "coord", "coords", "coordinate", "coordinates", "address",
+  "latlng", "latlon", "lnglat", "lonlat",
 ]);
 /**
+ * Long location stems matched as substrings of a word, so run-together lowercase keys
+ * (homelatitude, sitelocation, gpscoordinates) are caught. Short stems (lat, lon, lng, geo)
+ * are never substring-matched: they occur inside ordinary words (platform, salon, flatness).
+ */
+const LOCATION_STEMS = ["latitude", "longitude", "location", "coordinate"];
+/** Ordinary words that contain a stem; removed before the substring check. */
+const STEM_LOOKALIKES = /allocat/g;
+/**
  * True when any word of the key is a location word. Words split on separators and camelCase
- * boundaries: home_latitude, homeLatitude, HomeLat, GPS-Coords, coords all match.
+ * boundaries: home_latitude, homeLatitude, HomeLat, GPS-Coords, coords all match. Trailing
+ * digits are stripped (lat1, longitude2), and each word is also checked for a long location
+ * stem (latlng, homelatitude, sitelocation), while translation, platform and allocation stay.
  */
 export function isLocationKey(key: string): boolean {
   const words = key
@@ -149,7 +160,12 @@ export function isLocationKey(key: string): boolean {
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
-  return words.some((w) => LOCATION_WORDS.has(w));
+  return words.some((w) => {
+    const bare = w.replace(/[0-9]+$/, "");
+    if (LOCATION_WORDS.has(w) || LOCATION_WORDS.has(bare)) return true;
+    const scrubbed = bare.replace(STEM_LOOKALIKES, "");
+    return LOCATION_STEMS.some((stem) => scrubbed.includes(stem));
+  });
 }
 /** Drop location-looking keys from an undocumented record, at every depth (objects and arrays). */
 export function dropLocation(e: Record<string, unknown>): Record<string, unknown> {
