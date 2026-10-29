@@ -348,11 +348,16 @@ export class FleetClient {
   async energyCommand(siteId: string, path: string, body: Record<string, unknown>): Promise<unknown> {
     this.limiter.take("command", `site:${siteId}`);
     const base = await this.resolveBaseUrl();
-    const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
-    // Exact keys: a prefix delete would also drop another site whose id starts with this one.
-    this.cache.delete(`energy_info:${siteId}`);
-    this.cache.delete(`energy_live:${siteId}`);
-    return res.body;
+    try {
+      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
+      return res.body;
+    } finally {
+      // Always, even when the POST throws (5xx, timeout, dropped connection): the outcome may be
+      // unknown, so a read-back must hit the network, not a value cached before the send.
+      // Exact keys: a prefix delete would also drop another site whose id starts with this one.
+      this.cache.delete(`energy_info:${siteId}`);
+      this.cache.delete(`energy_live:${siteId}`);
+    }
   }
 
   /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */

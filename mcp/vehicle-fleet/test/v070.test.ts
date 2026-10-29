@@ -65,12 +65,19 @@ test("off-grid reserve: site reports unsupported = refused, nothing posted", asy
 });
 
 test("off-grid reserve: value absent or pre-read failing = sent once, precheck unavailable, never retried", async () => {
-  for (const r of [info({ backup_reserve_percent: 20 }), info({ [FIELD]: "20" }), (() => ({ status: 500, body: {} })) as Route]) {
+  const cases: Array<[Route, string]> = [
+    [info({ backup_reserve_percent: 20 }), "value_absent"],
+    [info({ [FIELD]: "20" }), "value_absent"],
+    [() => ({ status: 500, body: {} }), "read_failed"],
+    [() => ({ status: 403, body: { error: "unauthorized_missing_scopes", error_description: "missing scopes" } }), "read_failed"],
+  ];
+  for (const [r, reason] of cases) {
     const { ctx, calls } = setup(baseEnv(ON), { [INFO]: r, [POST]: updated });
     const c = await connect(ctx);
     const b = body(await c.callTool({ name: TOOL, arguments: { [FIELD]: 20, ...intent } }));
     assert.equal(b.ok, true);
     assert.equal(b.precheck, "unavailable");
+    assert.equal(b.precheckReason, reason);
     assert.equal(posts(calls).length, 1);
   }
   {
@@ -129,6 +136,7 @@ test("off-grid reserve: hidden and refused unless read-only is explicitly off (f
     const c = await connect(ctx);
     const names = (await c.listTools()).tools.map((t) => t.name);
     assert.ok(!names.includes(TOOL), String(ro));
+    assert.equal(names.length, 26, `exactly the 26 read tools with both opt-ins on, read-only ${String(ro)}`);
     const res = await c.callTool({ name: TOOL, arguments: { [FIELD]: 20, ...intent } });
     assert.equal(isError(res), true);
     assert.equal(body(res).readOnly, true);
@@ -156,4 +164,63 @@ test("location filter: relocation/dislocation/colocation are dropped on purpose 
   const { isLocationKey } = await import("../src/tools/energy.js");
   for (const k of ["relocation", "dislocation", "colocation", "relocation_count"]) assert.ok(isLocationKey(k), k);
   assert.ok(!isLocationKey("allocation"));
+});
+
+test("off-grid reserve: pre-read failing with login_required = that error, nothing sent", async () => {
+  const { ctx, calls } = setup(baseEnv(ON), {
+    [INFO]: () => ({ status: 401, body: { error: "invalid_token", error_description: "login_required" } }),
+    [POST]: updated,
+  });
+  const c = await connect(ctx);
+  const res = await c.callTool({ name: TOOL, arguments: { [FIELD]: 20, ...intent } });
+  assert.equal(isError(res), true);
+  assert.equal(body(res).code, "login_required");
+  assert.equal(posts(calls).length, 0);
+});
+
+test("every energy command: a read-back after a 502 / dropped connection hits the network (no stale cached site_info)", async () => {
+  const sends: Array<[string, string, Record<string, unknown>]> = [
+    ["set_backup_reserve", "backup", { backup_reserve_percent: 15 }],
+    ["set_operation_mode", "operation", { default_real_mode: "autonomous" }],
+    ["set_storm_mode", "storm_mode", { enabled: true }],
+    ["set_grid_import_export", "grid_import_export", { customer_preferred_export_rule: "pv_only" }],
+    [TOOL, "off_grid_vehicle_charging_reserve", { [FIELD]: 25 }],
+  ];
+  const failures: Route[] = [
+    () => ({ status: 502, body: {} }),
+    () => { throw Object.assign(new TypeError("fetch failed"), { cause: { code: "UND_ERR_SOCKET" } }); },
+  ];
+  for (const [tool, path, args] of sends) {
+    for (const fail of failures) {
+      const { ctx, calls } = setup(baseEnv(ON), {
+        [INFO]: info({ backup_reserve_percent: 20, [FIELD]: 10 }),
+        [`GET ${BASE}/api/1/energy_sites/${SITE}/live_status`]: () => ({ status: 200, body: { response: { percentage_charged: 50 } } }),
+        [`POST ${BASE}/api/1/energy_sites/${SITE}/${path}`]: fail,
+      });
+      const c = await connect(ctx);
+      await c.callTool({ name: "get_energy_site_info", arguments: {} }); // warm the cache
+      await c.callTool({ name: "get_energy_live_status", arguments: {} });
+      const b = body(await c.callTool({ name: tool, arguments: { ...args, ...intent } }));
+      assert.equal(b.code, "state_unknown", tool);
+      const infoBefore = infoReads(calls).length;
+      const liveBefore = calls.filter((x) => x.url.endsWith("/live_status")).length;
+      const r = body(await c.callTool({ name: "get_energy_site_info", arguments: {} }));
+      assert.equal(infoReads(calls).length, infoBefore + 1, `${tool}: site_info read-back reached the network`);
+      assert.equal(r.servedFromMemorySec, 0, tool);
+      await c.callTool({ name: "get_energy_live_status", arguments: {} });
+      assert.equal(calls.filter((x) => x.url.endsWith("/live_status")).length, liveBefore + 1, `${tool}: live_status read-back reached the network`);
+    }
+  }
+});
+
+test("get_energy_site_info omits off_grid_vehicle_charging_reserve_percent when the site does not return it", async () => {
+  const { ctx } = setup(baseEnv({ TESLA_DEFAULT_ENERGY_SITE_ID: SITE }), {
+    [INFO]: info({ backup_reserve_percent: 20, components: { battery: true } }),
+  });
+  const c = await connect(ctx);
+  const b = body(await c.callTool({ name: "get_energy_site_info", arguments: {} }));
+  assert.equal(b.ok, true);
+  assert.equal(b.backup_reserve_percent, 20);
+  assert.ok(!(FIELD in b), "absent, not null or undefined-valued");
+  assert.ok(!JSON.stringify(b).includes(FIELD));
 });

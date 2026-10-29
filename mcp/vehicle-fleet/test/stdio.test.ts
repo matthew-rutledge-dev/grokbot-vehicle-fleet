@@ -206,6 +206,7 @@ test("opt-in commands over stdio: placeholders = off; both flags on (with comman
   try {
     const names = (await ro.listTools()).tools.map((t) => t.name);
     for (const n of OPT_IN_COMMANDS) assert.ok(!names.includes(n), `${n} hidden read-only`);
+    assert.equal(names.length, 26, "read-only with both opt-ins on: exactly the 26 read tools");
   } finally {
     await ro.close();
   }

@@ -39,21 +39,26 @@ export const OFF_GRID_RESERVE_FIELD = "off_grid_vehicle_charging_reserve_percent
  * set_off_grid_vehicle_charging_reserve send-time check: one fresh site_info read.
  * - components.off_grid_vehicle_charging_reserve_supported === false: refused (not_supported).
  * - top-level off_grid_vehicle_charging_reserve_percent equal to the request: no-op, nothing sent.
- * - read failed, or the value is absent/non-numeric: sent anyway (the user confirmed), marked precheck "unavailable".
+ * - read failed, or the value is absent/non-numeric: sent anyway (the user confirmed), marked
+ *   precheck "unavailable" with precheckReason "read_failed" or "value_absent".
+ * - read failed with login_required / no_refresh_token: the send would fail too, so that error is
+ *   returned and nothing is sent.
  */
 async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ctx: ToolContext) {
   let data: Record<string, unknown>;
   try {
     data = (await ctx.fleet.energySiteInfo(siteId, true)).data;
-  } catch {
-    return { note: { precheck: "unavailable" } };
+  } catch (e) {
+    const code = e instanceof LocalRefusal ? e.code : e instanceof FleetApiError ? e.info.code : undefined;
+    if (code === "login_required" || code === "no_refresh_token") throw e;
+    return { note: { precheck: "unavailable", precheckReason: "read_failed" } };
   }
   const comps = isObj(data.components) ? data.components : {};
   if (comps.off_grid_vehicle_charging_reserve_supported === false) {
     throw new LocalRefusal("not_supported", "This energy site reports off-grid vehicle charging reserve as unsupported; nothing was sent.");
   }
   const current = data[OFF_GRID_RESERVE_FIELD];
-  if (typeof current !== "number" || !Number.isFinite(current)) return { note: { precheck: "unavailable" } };
+  if (typeof current !== "number" || !Number.isFinite(current)) return { note: { precheck: "unavailable", precheckReason: "value_absent" } };
   if (current === body[OFF_GRID_RESERVE_FIELD]) {
     return { skip: { ok: true, sent: false, noop: true, [OFF_GRID_RESERVE_FIELD]: current, message: "Already set to this value; nothing was sent." } };
   }
