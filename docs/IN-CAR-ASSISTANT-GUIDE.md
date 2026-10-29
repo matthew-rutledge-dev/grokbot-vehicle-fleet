@@ -23,7 +23,7 @@ The car must already be online. Commands never wake it; `wake_vehicle` is its ow
 | The person says | Tool | Notes |
 |---|---|---|
 | "Put this video / page on the screen" | `play_video_on_screen` (EXPERIMENTAL) | `https` public host names only. Hosts not on `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` need a separate, named approval and `allow_unlisted_host=true`. Opens the link; it does not press play. Video playback needs the car in Park. See [EXPERIMENTAL-SIGNED-COMMANDS.md](EXPERIMENTAL-SIGNED-COMMANDS.md) and section 4. |
-| "Take me to …" / "navigate to …" | `share_navigation` | `destination` text or `lat` + `lon` (not both). Coordinates are sent as `lat,lon` share text, which is not field-tested yet: ask whether the car showed the place. Do not repeat the address or coordinates beyond what they said. |
+| "Take me to …" / "navigate to …" | `share_navigation` | `destination` text or `lat` + `lon` (not both). Coordinates are sent as `lat,lon` share text, which is not field-tested yet: ask whether the car showed the place. Do not repeat the address or coordinates beyond what they said. One destination per send: "navigate to the Supercharger" = share its address or coordinates; multi-stop routes are not supported. |
 | "Warm it up" / "turn on the heat" | `climate_warm_up` | No arguments = configured defaults. Read back the steps; on `sent: "partial"` say which ran. |
 | "Cool it down" / "set it to 21" | `climate_start`, then `set_temps` (`driver_temp`) | Two commands: preview and confirm each one separately. |
 | "Turn climate off" | `climate_stop` | |

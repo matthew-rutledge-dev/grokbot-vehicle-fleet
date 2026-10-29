@@ -1,6 +1,6 @@
 {
   "name": "vehicle-fleet-mcp",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "type": "module",
   "description": "MCP server: vehicle status reads (cached-first, never auto-wake) and confirm-gated commands via the Fleet API and your own command proxy. Read-only unless TESLA_FLEET_READ_ONLY is explicitly off.",
@@ -13,7 +13,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc -p tsconfig.test.json",
     "pretest": "npm run build",
-    "test": "node --import tsx --test test/readonly.test.ts test/config.test.ts test/tools.test.ts test/tokenstore.test.ts test/auth.test.ts test/ratelimit.test.ts test/errors.test.ts test/reads.test.ts test/commands.test.ts test/commands-more.test.ts test/energy-commands.test.ts test/auth-helper.test.ts test/usage.test.ts test/energy.test.ts test/stdio.test.ts test/tokenexport.test.ts test/ownership.test.ts test/signed.test.ts test/video.test.ts test/keyacl.test.ts test/v060.test.ts"
+    "test": "node --import tsx --test test/readonly.test.ts test/config.test.ts test/tools.test.ts test/tokenstore.test.ts test/auth.test.ts test/ratelimit.test.ts test/errors.test.ts test/reads.test.ts test/commands.test.ts test/commands-more.test.ts test/energy-commands.test.ts test/auth-helper.test.ts test/usage.test.ts test/energy.test.ts test/stdio.test.ts test/tokenexport.test.ts test/ownership.test.ts test/signed.test.ts test/video.test.ts test/keyacl.test.ts test/v060.test.ts test/v061.test.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",

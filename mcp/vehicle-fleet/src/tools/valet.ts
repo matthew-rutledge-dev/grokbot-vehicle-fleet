@@ -31,13 +31,30 @@ export function valetPin(ctx: ToolContext): string {
   return pin;
 }
 
-const PIN_ARG_NAMES = new Set(["pin", "password", "valetpin", "passcode", "passwd", "pincode", "valetpassword"]);
+/**
+ * The PIN registered for short-secret redaction: only a well-formed 4-digit value. A malformed
+ * TESLA_FLEET_VALET_PIN is never sent (valetPin refuses it), so registering it would only mask
+ * unrelated text (an empty-ish or 1-digit value would hit almost every number).
+ */
+export function redactableValetPin(pin: string | undefined): string | undefined {
+  return pin !== undefined && PIN_RE.test(pin) ? pin : undefined;
+}
+
+const PIN_ARG_NAMES = new Set([
+  "pin", "password", "valetpin", "passcode", "passwd", "pincode", "valetpassword",
+  "code", "secret", "valetcode", "valetsecret", "valetpasscode",
+]);
+
+/** Normalised argument name (case and separators dropped): valet-code, Valet_Code, valetCode -> valetcode. */
+export function isPinArgName(key: string): boolean {
+  return PIN_ARG_NAMES.has(key.toLowerCase().replace(/[^a-z]/g, ""));
+}
 
 function refusePinArg(args: ToolArgs): void {
-  // Case- and separator-insensitive: PIN, Password, valet-pin, valetPin, pass_code ...
+  // Case- and separator-insensitive: PIN, Password, valet-pin, valetPin, pass_code, Secret, valet_code ...
   for (const k of Object.keys(args)) {
-    if (PIN_ARG_NAMES.has(k.toLowerCase().replace(/[^a-z]/g, ""))) {
-      bad("a PIN or password argument is not accepted (the PIN comes only from TESLA_FLEET_VALET_PIN)");
+    if (isPinArgName(k)) {
+      bad("a PIN, password, code or secret argument is not accepted (the PIN comes only from TESLA_FLEET_VALET_PIN)");
     }
   }
 }
