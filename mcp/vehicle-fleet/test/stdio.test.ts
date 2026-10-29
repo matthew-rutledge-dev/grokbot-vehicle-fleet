@@ -12,7 +12,7 @@ import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { COMMANDS, READ_TOOLS, VIN, fixtureData, tmpDir } from "./helpers.js";
+import { COMMANDS, OPT_IN_COMMANDS, READ_TOOLS, VIN, fixtureData, tmpDir } from "./helpers.js";
 
 const pkgDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const entry = path.join(pkgDir, "dist", "index.js");
@@ -54,7 +54,8 @@ async function connect(extra: Record<string, string>) {
   }
   for (const k of ["TESLA_CLIENT_ID", "TESLA_REFRESH_TOKEN", "TESLA_FLEET_REGION", "TESLA_FLEET_BASE_URL", "TESLA_COMMAND_PROXY_URL",
     "TESLA_COMMAND_PROXY_CA_CERT", "TESLA_FLEET_READ_ONLY", "TESLA_FLEET_ENABLE_LOCATION", "TESLA_DEFAULT_VIN",
-    "TESLA_FLEET_COMMAND_KEY_FILE", "TESLA_FLEET_VIDEO_HOST_ALLOWLIST", "TESLA_FLEET_AUDIT_LOG", "TESLA_FLEET_AUDIT_FULL_VIN"]) {
+    "TESLA_FLEET_COMMAND_KEY_FILE", "TESLA_FLEET_VIDEO_HOST_ALLOWLIST", "TESLA_FLEET_AUDIT_LOG", "TESLA_FLEET_AUDIT_FULL_VIN",
+    "TESLA_FLEET_ENABLE_VALET", "TESLA_FLEET_VALET_PIN", "TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS"]) {
     env[k] = `\${${k}}`; // unexpanded host placeholders
   }
   env.TESLA_TOKEN_STORE = path.join(tmpDir(), "tokens.json");
@@ -88,7 +89,7 @@ test("initialize + default (placeholders) = read-only: no command tools", async 
     assert.equal(text(res).readOnly, true);
     const b = text(await c.callTool({ name: "describe_boundary", arguments: {} }));
     assert.match(String(b.readOnlyStatus), /unexpanded placeholder/);
-    assert.equal(names.length, 22);
+    assert.equal(names.length, 26);
     const u = text(await c.callTool({ name: "get_api_usage", arguments: {} }));
     assert.equal(u.ok, true);
     assert.equal(u.localEstimate, true);
@@ -106,7 +107,7 @@ test("TESLA_FLEET_READ_ONLY=false exposes commands; no confirm = dry-run with ze
   try {
     const names = (await c.listTools()).tools.map((t) => t.name).sort();
     assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, "get_location"].sort());
-    assert.equal(names.length, 49);
+    assert.equal(names.length, 66);
     assert.ok(names.includes("get_api_usage"));
     const before = hits.length;
     const b = text(await c.callTool({ name: "door_lock", arguments: {} }));
@@ -175,5 +176,37 @@ test("play_video_on_screen (EXPERIMENTAL): hidden + refused read-only; listed wi
     assert.equal(hits.length, before, "no HTTP request");
   } finally {
     await on.close();
+  }
+});
+
+test("opt-in commands over stdio: placeholders = off; both flags on (with commands on) lists valet + experimental extras; PIN never listed", async () => {
+  const off = await connect({ ...live(), TESLA_FLEET_READ_ONLY: "false" });
+  try {
+    const names = (await off.listTools()).tools.map((t) => t.name);
+    for (const n of OPT_IN_COMMANDS) assert.ok(!names.includes(n), n);
+  } finally {
+    await off.close();
+  }
+  const on = await connect({ ...live(), TESLA_FLEET_READ_ONLY: "false", TESLA_FLEET_ENABLE_VALET: "1", TESLA_FLEET_VALET_PIN: "7391", TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS: "1" });
+  try {
+    const tools = (await on.listTools()).tools;
+    const names = tools.map((t) => t.name).sort();
+    assert.deepEqual(names, [...READ_TOOLS, ...COMMANDS, ...OPT_IN_COMMANDS, "get_location"].sort());
+    assert.equal(names.length, 70);
+    assert.ok(!JSON.stringify(tools).includes("7391"));
+    const before = hits.length;
+    const b = text(await on.callTool({ name: "set_valet_mode", arguments: { on: true, vin: VIN } }));
+    assert.equal(b.dryRun, true);
+    assert.ok(!JSON.stringify(b).includes("7391"));
+    assert.equal(hits.length, before, "no HTTP request");
+  } finally {
+    await on.close();
+  }
+  const ro = await connect({ ...live(), TESLA_FLEET_ENABLE_VALET: "1", TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS: "1" });
+  try {
+    const names = (await ro.listTools()).tools.map((t) => t.name);
+    for (const n of OPT_IN_COMMANDS) assert.ok(!names.includes(n), `${n} hidden read-only`);
+  } finally {
+    await ro.close();
   }
 });

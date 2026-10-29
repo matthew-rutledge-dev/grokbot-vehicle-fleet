@@ -370,6 +370,12 @@ export class FleetClient {
     return this.energyGet(`energy_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `calendar_history?${q}`);
   }
 
+  /** Wall Connector charge history: GET telemetry_history?kind=charge (bounded dates; cached like energy history). */
+  chargeHistory(siteId: string, query: Record<string, string>) {
+    const q = new URLSearchParams(query).toString();
+    return this.energyGet(`charge_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `telemetry_history?${q}`);
+  }
+
   /** POST wake_up, then poll connectivity state (bounded). Only via the wake_vehicle tool. */
   async wakeUp(vin: string): Promise<{ state?: string; waitedSec: number }> {
     this.limiter.take("wake", vin);

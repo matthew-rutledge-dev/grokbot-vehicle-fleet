@@ -10,18 +10,18 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import { AuditLog } from "./audit.js";
 import { TokenManager } from "./auth.js";
 import { KeepFresh, type Scheduler } from "./tokenexport.js";
-import { loadConfig, type Config } from "./config.js";
+import { ENV, loadConfig, type Config } from "./config.js";
 import type { ToolContext } from "./context.js";
-import type { Env } from "./env.js";
+import { readEnv, type Env } from "./env.js";
 import { FleetApiError, LocalRefusal } from "./errors.js";
 import { FleetClient, type FleetClientOptions } from "./fleet.js";
 import { Http, type FetchLike } from "./http.js";
 import { RateLimiter } from "./ratelimit.js";
 import { READ_ONLY_ENV } from "./readonly.js";
-import { redactSecrets } from "./redact.js";
+import { redactSecrets, redactShortSecrets } from "./redact.js";
 import { jsonResult } from "./result.js";
 import { TokenStore } from "./tokenstore.js";
-import { findTool, isVisible, listTools } from "./tools.js";
+import { findTool, isVisible, listTools, optInOn } from "./tools.js";
 import { ENV_LOCATION_NAME } from "./tools/names.js";
 import { UsageTracker, usagePathFor } from "./usage.js";
 import { SERVER_NAME, VERSION } from "./version.js";
@@ -58,8 +58,16 @@ export function startTokenKeepFresh(ctx: ToolContext, deps: { now?: () => number
 }
 
 export function createServer(ctx: ToolContext): Server {
-  const mode = { readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled, nhtsaEnabled: ctx.config.nhtsaEnabled };
-  const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues()];
+  const mode = {
+    readOnly: ctx.config.readOnly.readOnly, locationEnabled: ctx.config.locationEnabled, nhtsaEnabled: ctx.config.nhtsaEnabled,
+    valetEnabled: ctx.config.valetEnabled, experimentalEnabled: ctx.config.experimentalEnabled,
+  };
+  // TESLA_FLEET_VALET_PIN is read at call time (never stored); it is short, so it also goes
+  // through redactShortSecrets. A command's request can be echoed back by the proxy (400 body,
+  // result:false reason), so every command result and every error body is scrubbed.
+  const valetPin = () => readEnv(ENV.VALET_PIN, ctx.env);
+  const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues(), valetPin()];
+  const scrub = (body: unknown) => redactShortSecrets(JSON.parse(redactSecrets(JSON.stringify(body), secrets())), [valetPin()]);
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listTools(mode) }));
@@ -70,6 +78,13 @@ export function createServer(ctx: ToolContext): Server {
     const def = findTool(name);
     if (!def) return jsonResult({ ok: false, error: `Unknown tool: ${name}` }, true);
     if (!isVisible(def, mode)) {
+      if (def.kind === "command" && !mode.readOnly && !optInOn(def, mode)) {
+        const flag = def.optIn === "valet" ? "TESLA_FLEET_ENABLE_VALET" : "TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS";
+        return jsonResult({
+          ok: false, optInRequired: flag, sent: false,
+          error: `Refused: ${name} is an opt-in command and ${flag} is not on. Nothing was sent.`,
+        }, true);
+      }
       if (def.kind === "command") {
         return jsonResult({
           ok: false, readOnly: true, sent: false,
@@ -88,7 +103,8 @@ export function createServer(ctx: ToolContext): Server {
       }, true);
     }
     try {
-      return jsonResult(await def.handler(args, ctx));
+      const out = await def.handler(args, ctx);
+      return jsonResult(def.kind === "command" ? scrub(out) : out);
     } catch (err) {
       let body: Record<string, unknown>;
       if (err instanceof LocalRefusal) {
@@ -98,7 +114,7 @@ export function createServer(ctx: ToolContext): Server {
       } else {
         body = { ok: false, error: err instanceof Error ? err.message : String(err) };
       }
-      return { ...jsonResult(JSON.parse(redactSecrets(JSON.stringify(body), secrets())), true) };
+      return { ...jsonResult(scrub(body), true) };
     }
   });
 

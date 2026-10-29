@@ -51,7 +51,12 @@ test("every command: exact endpoint + body via the proxy, bearer auth, never dir
 });
 
 test("every vehicle command: without confirm = preview with zero network; read-only hides and refuses", async () => {
-  const argsFor = (n: string) => CASES.find((c) => c[0] === n)?.[1] ?? (n === "actuate_trunk" ? { which_trunk: "rear" } : n === "share_navigation" ? { destination: "1 Example Street" } : {});
+  const extra: Record<string, Record<string, unknown>> = {
+    actuate_trunk: { which_trunk: "rear" }, share_navigation: { destination: "1 Example Street" },
+    window_control: { command: "close" }, set_cop_temp: { level: "low" }, set_climate_keeper_mode: { mode: "dog" },
+    set_auto_seat_climate: { seat: "driver", on: true }, adjust_volume: { volume: 5 }, trigger_homelink: { lat: 1.5, lon: 2.5 },
+  };
+  const argsFor = (n: string) => CASES.find((c) => c[0] === n)?.[1] ?? extra[n] ?? {};
   {
     const { ctx, calls } = setup(baseEnv(ON));
     const c = await connect(ctx);

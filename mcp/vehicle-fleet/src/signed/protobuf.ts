@@ -4,7 +4,7 @@
  *
  * Field numbers come from teslamotors/vehicle-command (Apache-2.0):
  * pkg/protocol/protobuf/{universal_message,signatures,car_server}.proto.
- * VehicleAction.videoRequestAction = 57 and DashcamSaveClipAction = 47 are NOT in
+ * VehicleAction.videoRequestAction = 57, dashcamSaveClipAction = 47 and boomboxAction = 64 are NOT in
  * the official protos; they are community-documented (Teslemetry/tesla-protocol,
  * Apache-2.0, marked TESLEMETRY-EXT there). See THIRD_PARTY_NOTICES.md.
  */

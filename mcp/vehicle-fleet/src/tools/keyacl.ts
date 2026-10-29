@@ -2,13 +2,15 @@
  * Windows-only, best-effort, NON-FATAL check of the command key file's ACL.
  * POSIX hosts enforce chmod 600 + owner in video.ts; Windows has no mode bits,
  * so statKey only checks that the file exists there. This helper runs the
- * built-in `icacls <file>` (metadata only; the key is never read) and warns when
+ * built-in `%SystemRoot%\\System32\\icacls.exe <file>` (absolute path, so a PATH entry cannot
+ * shadow it; metadata only; the key is never read), asynchronously (a slow icacls never blocks
+ * the server; 5 s timeout), and warns when
  * a broad group (Everyone, BUILTIN\Users, Authenticated Users, or their
  * well-known SIDs) holds an allow entry with read, write or full rights.
  * English principal names only (icacls localises them; SIDs are matched too).
  * Any failure to run or parse icacls yields no warning, never a refusal.
  */
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import path from "node:path";
 
 const BROAD_PRINCIPALS = [
@@ -53,19 +55,32 @@ export function parseIcaclsBroadAccess(output: string): string[] {
 export type AclCheckOptions = {
   platform?: NodeJS.Platform;
   /** Test seam: returns icacls stdout for the file. */
-  run?: (file: string) => string;
+  run?: (file: string) => string | Promise<string>;
+  /** Test seam: environment used to find %SystemRoot%. */
+  env?: Record<string, string | undefined>;
 };
 
-function runIcacls(file: string): string {
-  return execFileSync("icacls", [file], { encoding: "utf8", timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+/** %SystemRoot%\System32\icacls.exe (windir as fallback, then C:\Windows). */
+export function icaclsPath(env: Record<string, string | undefined> = process.env): string {
+  const root = env.SystemRoot?.trim() || env.SYSTEMROOT?.trim() || env.windir?.trim() || env.WINDIR?.trim() || "C:\\Windows";
+  return path.win32.join(root, "System32", "icacls.exe");
+}
+
+function runIcacls(file: string, env?: Record<string, string | undefined>): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(icaclsPath(env), [file], { encoding: "utf8", timeout: 5000, windowsHide: true }, (err, stdout) => {
+      if (err) reject(err);
+      else resolve(stdout);
+    });
+  });
 }
 
 /** Warning text when a broad group can access the key file on Windows; undefined otherwise (and on any error). */
-export function windowsKeyAclWarning(file: string | undefined, opts: AclCheckOptions = {}): string | undefined {
+export async function windowsKeyAclWarning(file: string | undefined, opts: AclCheckOptions = {}): Promise<string | undefined> {
   if (!file || (opts.platform ?? process.platform) !== "win32") return undefined;
   let out: string;
   try {
-    out = (opts.run ?? runIcacls)(path.resolve(file));
+    out = await (opts.run ?? ((f: string) => runIcacls(f, opts.env)))(path.resolve(file));
   } catch {
     return undefined;
   }

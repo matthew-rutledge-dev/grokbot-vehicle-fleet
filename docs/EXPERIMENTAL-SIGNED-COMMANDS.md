@@ -14,6 +14,17 @@ What the car does with the URL (observed, not documented by Tesla):
 - **Accepted but not shown:** some sites may be accepted by the car (authenticated OK) and still never appear. Acceptance never proves anything was shown; always ask the user what the screen shows.
 - **Local addresses:** `http://` URLs, IP addresses (for example a home server on the LAN) and private names are refused by this tool before anything is sent, by design. Use a public https name instead.
 
+## Opt-in extras: `dashcam_save_clip`, `remote_boombox` (0.6.0)
+
+Off by default. Listed only when `TESLA_FLEET_READ_ONLY` is off **and** `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` is `1`/`true`/`yes`/`on` (anything else keeps them hidden and refused). Same transport, key, safety gates (dry-run, `confirm` + `user_request`, online and paired checks, no wake, no retry), audit log and cost (2 billed command requests) as `play_video_on_screen`; there is no URL, so no allowlist.
+
+| Tool | Action | Body | Status |
+|---|---|---|---|
+| `dashcam_save_clip` | `VehicleAction.dashcamSaveClipAction` (field **47**, empty) | none | Field-tested once (accepted; clip saved). Needs a USB drive in the car. Stock proxy: `400 invalid_command`. |
+| `remote_boombox` | `VehicleAction.boomboxAction` (field **64**, `BoomboxAction { uint32 sound = 1; }`) | `sound`: `fart` = 0, `locate_ping` = 2000 only | **Not field-tested.** The two ids are the ones Tesla's Fleet API docs give for `remote_boombox`. Stock proxy: "command not implemented". Field 64 is community-documented (`Teslemetry/tesla-protocol`, marked as an extension), not in Tesla's published protos. |
+
+Both are labelled "(experimental)" in their titles and their descriptions start with "EXPERIMENTAL, OPT-IN". `play_video_on_screen` keeps its own code path unchanged.
+
 ## Why not the proxy
 
 Stock `tesla-http-proxy` maps REST endpoints (`/api/1/vehicles/{vin}/command/<name>`) to protobuf actions it knows. It has no endpoint for `videoRequestAction` (the same is true for `dashcamSaveClipAction`, field 47, which the proxy answers with `400 invalid_command`). So this tool does not use `TESLA_COMMAND_PROXY_URL`. It builds and signs the message itself and posts it to the Fleet API's `signed_command` endpoint, the same transport the vehicle-command Go SDK uses (`pkg/connector/inet`).
@@ -33,10 +44,10 @@ There is no automatic retry and no session cache: every call does a fresh handsh
 
 Signing needs the virtual key's **private** key: the same key your command proxy uses and that is paired with the car. Set `TESLA_FLEET_COMMAND_KEY_FILE` to its path **only on the host that already holds that key**, and run this MCP server there. Do not copy the key to another machine, and never commit it. The file is read at send time, never logged or returned. It must be a P-256 EC private key in PEM form (SEC1 `EC PRIVATE KEY` or PKCS#8). On POSIX it must be owned by the user running the server and have no group/other permission bits: `chmod 600 /path/to/key.pem`. Otherwise the call is refused with `command_key_insecure_permissions` before anything is read or sent.
 
-On **Windows** there are no mode bits, so the file is only checked to exist. In addition, previews run the built-in `icacls <file>` (metadata only; the key is not read) and add a **non-fatal** `commandKeyWarning` when a broad group (`Everyone`, `BUILTIN\Users`, `NT AUTHORITY\Authenticated Users`, or their well-known SIDs) has an allow entry with read, write or full rights. It is a warning, not a refusal; English principal names and the SIDs are matched, and if `icacls` cannot run there is no warning. Restrict the file to your own account, for example:
+On **Windows** there are no mode bits, so the file is only checked to exist. In addition, previews run the built-in `icacls <file>` from `%SystemRoot%\System32` (full path, not a `PATH` lookup; metadata only; the key is not read; asynchronous, at most 5 s) and add a **non-fatal** `commandKeyWarning` when a broad group (`Everyone`, `BUILTIN\Users`, `NT AUTHORITY\Authenticated Users`, or their well-known SIDs) has an allow entry with read, write or full rights. It is a warning, not a refusal; English principal names and the SIDs are matched, and if `icacls` cannot run there is no warning. Restrict the file to your own account, for example:
 
 ```powershell
-icacls C:\path\to\key.pem /inheritance:r /grant:r "%USERNAME%:R"
+icacls C:\path\to\key.pem /inheritance:r /grant:r "${env:USERNAME}:R"
 ```
 
 ## Safety gates

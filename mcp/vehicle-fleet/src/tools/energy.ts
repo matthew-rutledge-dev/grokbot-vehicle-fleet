@@ -132,6 +132,23 @@ export function buildHistoryQuery(args: ToolArgs, now: Date = new Date()): Histo
 }
 
 const SERIES_CAP = 400;
+const SESSIONS_CAP = 100;
+
+const LOCATION_KEY = /(^|_)(lat|lon|lng|latitude|longitude|location|gps|coordinates?|address)($|_)/i;
+/** Drop location-looking keys from an undocumented record, at every depth (objects and arrays). */
+export function dropLocation(e: Record<string, unknown>): Record<string, unknown> {
+  return dropLocationDeep(e, 0) as Record<string, unknown>;
+}
+function dropLocationDeep(v: unknown, depth: number): unknown {
+  if (depth > 8) return undefined;
+  if (Array.isArray(v)) return v.map((x) => dropLocationDeep(x, depth + 1));
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v as Record<string, unknown>)
+      .filter(([k]) => !LOCATION_KEY.test(k))
+      .map(([k, x]) => [k, dropLocationDeep(x, depth + 1)]));
+  }
+  return v;
+}
 const EVENTS_CAP = 100;
 
 /** Sum every numeric field across the time series (Wh). */
@@ -250,6 +267,40 @@ export const ENERGY_TOOLS: ToolDef[] = [
         totals: sumSeries(series),
         series: args.include_series === true ? series.slice(0, SERIES_CAP) : undefined,
         seriesTruncated: args.include_series === true && series.length > SERIES_CAP ? true : undefined,
+      };
+    }),
+  },
+  {
+    kind: "read",
+    tool: {
+      name: "get_wall_connector_charge_history",
+      description: `Wall Connector charging sessions for a bounded date range (at most 31 days; dates YYYY-MM-DD in time_zone, default UTC; default range: today): count, total energy added (Wh) and, with include_sessions=true, the sessions (capped at ${SESSIONS_CAP}). Tesla does not document the session fields, so known numeric energy fields are summed and other fields are passed through (location-like keys dropped at every depth). One billable data call (cached 5 min). Needs ${ENERGY_SCOPE}.`,
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...SITE_PROP,
+          start_date: { type: "string", description: "YYYY-MM-DD (default: end_date)." },
+          end_date: { type: "string", description: "YYYY-MM-DD (default: today in time_zone)." },
+          time_zone: { type: "string", description: "IANA zone, e.g. America/New_York (default UTC)." },
+          include_sessions: { type: "boolean", description: "Also return the session list (capped)." },
+        },
+      },
+    },
+    handler: (args, ctx) => withScopeHint(async () => {
+      const h = buildHistoryQuery({ ...args, kind: "energy", period: "day" }); // same bounded-date checks (31 days)
+      const q = { kind: "charge", start_date: h.start_date, end_date: h.end_date, time_zone: h.time_zone };
+      const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id);
+      const { data, ageSec } = await ctx.fleet.chargeHistory(siteId, q);
+      const raw = Array.isArray(data.charge_history) ? (data.charge_history as unknown[]) : [];
+      const sessions = raw.filter((e): e is Record<string, unknown> => !!e && typeof e === "object").map(dropLocation);
+      const energy = sessions.reduce((a, e) => a + (typeof e.energy_added_wh === "number" ? e.energy_added_wh : 0), 0);
+      return {
+        ok: true, energy_site_id: siteId, servedFromMemorySec: ageSec, query: q,
+        sessions: sessions.length,
+        totalEnergyAddedWh: sessions.some((e) => typeof e.energy_added_wh === "number") ? Math.round(energy) : undefined,
+        sessionFields: [...new Set(sessions.flatMap((e) => Object.keys(e)))].slice(0, 30),
+        list: args.include_sessions === true ? sessions.slice(0, SESSIONS_CAP) : undefined,
+        listTruncated: args.include_sessions === true && sessions.length > SESSIONS_CAP ? true : undefined,
       };
     }),
   },

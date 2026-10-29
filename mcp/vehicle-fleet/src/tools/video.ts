@@ -34,7 +34,7 @@ const TRANSPORT = "signed_command (Fleet API, signed locally)";
 /** Test seam: signed-client options (clock / randomness). */
 export const signedClientOptions: { value: SignedClientOptions } = { value: {} };
 
-type KeyStatus = "ok" | "present" | "not_configured" | "unreadable" | "insecure_permissions" | "wrong_owner" | "invalid";
+export type KeyStatus = "ok" | "present" | "not_configured" | "unreadable" | "insecure_permissions" | "wrong_owner" | "invalid";
 
 const POSIX = process.platform !== "win32" && typeof process.getuid === "function";
 
@@ -59,15 +59,15 @@ export function statKey(file: string | undefined): KeyStatus {
   return "present";
 }
 
-/** Non-fatal Windows ACL warning, only for a key file that is present. */
-function keyAclWarning(file: string | undefined, st: KeyStatus): { commandKeyWarning?: string } {
+/** Non-fatal Windows ACL warning, only for a key file that is present (async: never blocks the event loop). */
+export async function keyAclWarning(file: string | undefined, st: KeyStatus): Promise<{ commandKeyWarning?: string }> {
   if (st !== "present" && st !== "ok") return {};
-  const w = windowsKeyAclWarning(file);
+  const w = await windowsKeyAclWarning(file);
   return w ? { commandKeyWarning: w } : {};
 }
 
 /** statKey, then read + parse (send paths only). */
-function loadKey(file: string | undefined): { status: KeyStatus; key?: ReturnType<typeof loadPrivateKeyPem> } {
+export function loadKey(file: string | undefined): { status: KeyStatus; key?: ReturnType<typeof loadPrivateKeyPem> } {
   const st = statKey(file);
   if (st !== "present") return { status: st };
   let pem: string;
@@ -83,7 +83,7 @@ function loadKey(file: string | undefined): { status: KeyStatus; key?: ReturnTyp
   }
 }
 
-const KEY_TEXT: Record<KeyStatus, string> = {
+export const KEY_TEXT: Record<KeyStatus, string> = {
   ok: "Command key loaded.",
   present: "Command key file present with private permissions (not read in a preview).",
   not_configured: "TESLA_FLEET_COMMAND_KEY_FILE is not set.",
@@ -94,7 +94,7 @@ const KEY_TEXT: Record<KeyStatus, string> = {
 };
 
 /** Refusal code for a key status (wrong owner shares the permissions code). */
-function keyCode(st: KeyStatus): string {
+export function keyCode(st: KeyStatus): string {
   return st === "wrong_owner" ? "command_key_insecure_permissions" : `command_key_${st}`;
 }
 
@@ -167,7 +167,7 @@ export const PLAY_VIDEO: ToolDef = {
         ...(listed ? {} : { needsAllowUnlistedHost: true }),
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
         commandKey: KEY_TEXT[keySt],
-        ...keyAclWarning(ctx.config.commandKeyFile, keySt),
+        ...(await keyAclWarning(ctx.config.commandKeyFile, keySt)),
         wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
         estimatedBillableCalls: "2 commands (session handshake + videoRequestAction) after the 2 checks",
         toSend: listed
@@ -200,7 +200,7 @@ export const PLAY_VIDEO: ToolDef = {
         ],
         vinLast4: preVin ? preVin.slice(-4) : "(resolved at send time)",
         commandKey: KEY_TEXT[keyed.status],
-        ...keyAclWarning(ctx.config.commandKeyFile, keyed.status),
+        ...(await keyAclWarning(ctx.config.commandKeyFile, keyed.status)),
         note: "Validated only; no network call was made.",
       };
     }

@@ -2,7 +2,8 @@
 /** vehicle-fleet MCP entry point (stdio). See server.ts. */
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { ToolContext } from "./context.js";
-import { redactSecrets } from "./redact.js";
+import { readEnv } from "./env.js";
+import { redactSecrets, redactShortSecrets } from "./redact.js";
 import { buildContext, createServer, startTokenKeepFresh } from "./server.js";
 
 let ctx: ToolContext | undefined;
@@ -17,7 +18,7 @@ function secrets(): Array<string | undefined> {
 }
 
 function logErr(text: string): void {
-  console.error(redactSecrets(text, secrets()));
+  console.error(redactShortSecrets(redactSecrets(text, secrets()), [readEnv("TESLA_FLEET_VALET_PIN")]) as string);
 }
 
 async function main() {

@@ -23,7 +23,7 @@ The car must already be online. Commands never wake it; `wake_vehicle` is its ow
 | The person says | Tool | Notes |
 |---|---|---|
 | "Put this video / page on the screen" | `play_video_on_screen` (EXPERIMENTAL) | `https` public host names only. Hosts not on `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` need a separate, named approval and `allow_unlisted_host=true`. Opens the link; it does not press play. Video playback needs the car in Park. See [EXPERIMENTAL-SIGNED-COMMANDS.md](EXPERIMENTAL-SIGNED-COMMANDS.md) and section 4. |
-| "Take me to …" / "navigate to …" | `share_navigation` | `destination` text or `lat` + `lon`. Do not repeat the address or coordinates beyond what they said. |
+| "Take me to …" / "navigate to …" | `share_navigation` | `destination` text or `lat` + `lon` (not both). Coordinates are sent as `lat,lon` share text, which is not field-tested yet: ask whether the car showed the place. Do not repeat the address or coordinates beyond what they said. |
 | "Warm it up" / "turn on the heat" | `climate_warm_up` | No arguments = configured defaults. Read back the steps; on `sent: "partial"` say which ran. |
 | "Cool it down" / "set it to 21" | `climate_start`, then `set_temps` (`driver_temp`) | Two commands: preview and confirm each one separately. |
 | "Turn climate off" | `climate_stop` | |
@@ -39,19 +39,26 @@ The car must already be online. Commands never wake it; `wake_vehicle` is its ow
 | "Charge to 80%" | `set_charge_limit` (`percent`, 50-100) | "Already set" replies are normal. |
 | "Charge at 16 amps" | `set_charging_amps` | The car caps at the charger's limit. |
 | "Open / close the charge port" | `charge_port_door_open`, `charge_port_door_close` | |
+| "Open the garage" | `trigger_homelink` | Only when the person asks right now; never from an arrival, geofence or schedule trigger, and never set one up. Omit `lat`/`lon` to use the car's live location (needs location on). Refused with `homelink_not_nearby` unless the car reports a HomeLink device nearby. |
+| "Crack / vent the windows", "close the windows" | `window_control` (`command`: `vent` / `close`) | Needs an explicit `vin`. `vent` only when a live read shows Park; refused with `not_parked` / `gear_unknown` otherwise. Never automated. |
+| "Pause / play", "next song", "previous", "next favorite" | `media_toggle_playback`, `media_next_track`, `media_prev_track`, `media_next_fav`, `media_prev_fav` | Each tap is its own command and its own yes. |
+| "Turn it up / down", "volume 5" | `media_volume_up`, `media_volume_down`, `adjust_volume` (0-10) | Out of range is refused, not clamped. `get_media_state` shows what is playing and the volume. |
+| "Keep the cabin cool at 35" / "overheat at high" | `set_cop_temp` (`low` 30 °C, `medium` 35 °C, `high` 40 °C) | `cop_mapping_unknown`: nothing sent; say the server could not tell how this car numbers the levels. |
+| "Dog mode" / "camp mode" / "keep climate on" | `set_climate_keeper_mode` (`off`/`on`/`dog`/`camp`) | Climate must be on for it to hold. |
+| "Auto seat heat for me / the passenger" | `set_auto_seat_climate` (`seat`: `driver`/`passenger`, `on`) | |
+| "Valet mode on / off", "reset the valet PIN" | `set_valet_mode`, `reset_valet_pin` (only when `TESLA_FLEET_ENABLE_VALET` is on) | Needs an explicit `vin`. The PIN comes from the server's env only: never ask for it, say it, or pass it. |
+| "Save the dashcam" / "play the boombox" | `dashcam_save_clip`, `remote_boombox` (`fart` / `locate_ping`) (EXPERIMENTAL, only with `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS`) | Dashcam needs a USB drive in the car. Boombox is not field-tested. |
 | "Wake the car" | `wake_vehicle` | Costs money and battery; offer, never assume. |
 | Powerwall reserve / mode / storm watch / grid export | `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export` | Read `get_energy_site_info` first and say old -> new. |
-| "How much charge / is it locked / tire pressures / where is it" | `get_vehicle_snapshot`, `get_battery_charge`, `get_closures`, `get_climate`, `get_tires`, `get_location` | Reads, no confirm. One read, no polling. Location only when asked, coarse unless they ask for precise. |
+| "How much charge / is it locked / tire pressures / where is it / is valet on / what's playing / when does it charge" | `get_vehicle_snapshot`, `get_battery_charge`, `get_closures`, `get_climate`, `get_tires`, `get_location`, `get_security_status`, `get_media_state`, `get_schedules` | Reads, no confirm. One read, no polling. Location only when asked, coarse unless they ask for precise. |
 
 ## 3. Not supported (say so; do not improvise)
 
 | Ask | Status |
 |---|---|
-| **Garage door / HomeLink** | No tool. Fleet API has `trigger_homelink`, which needs the car's current `lat`/`lon` and fails with `not_supported` on cars without HomeLink. Home Assistant's `tesla_fleet` integration reads the car's location first for this reason ([button.py](https://github.com/home-assistant/core/blob/dev/homeassistant/components/tesla_fleet/button.py)). Say it is not supported here. Only if a Home Assistant tool is already available in this conversation and the person asks for it may you use that tool (with its own confirmation rules); never set one up or route around this plugin. |
-| **Windows (vent/close)** | No tool. Fleet API `window_control` works only on a parked car, and closing needs the user's location. |
-| **Dashcam save** | No tool yet. The plugin has the message encoder (CarServer `dashcamSaveClipAction`, field 47) but does not expose it. |
 | **Notifications / pop-ups on the screen** | Fleet API has no notification command. Opening a page is the closest thing. |
-| **Media play/pause/volume, remote start, valet, speed limit, guest mode, software updates** | Not supported. |
+| **Auto steering wheel heat** | No tool. Tesla documents `remote_auto_steering_wheel_heat_climate_request`, but the stock signing proxy has no handler for it and Tesla's published protocol has no message for it. Its state is readable in `get_climate`; use `set_steering_wheel_heater` for on/off. |
+| **Remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates** | Not supported. |
 
 Never call raw Fleet API endpoints, scripts or another agent to get around a missing tool.
 
@@ -103,15 +110,19 @@ Placeholders throughout. The tool calls are shown as `tool(args)`.
 >
 > Assistant: *calls again with `confirm=true`, `user_request="Go ahead"`* Sent. It should show up as your route.
 
-**Garage (not supported)**
+**Garage**
 
 > Driver: Open the garage.
 >
-> Assistant: I can't trigger HomeLink from here; this plugin doesn't have that command. You can use the HomeLink button on the screen.
+> Assistant: *previews `trigger_homelink()`* That will press HomeLink on the car ending XXXX, using the car's current location. Open it?
 >
-> *(Only if a Home Assistant tool is already connected in this conversation:)* Driver: Then open it with Home Assistant.
+> Driver: Yes.
 >
-> Assistant: *uses that tool under its own confirmation rules, not this plugin.*
+> Assistant: *calls again with `confirm=true`, `user_request="Open the garage. Yes."`* Sent. (If it returns `homelink_not_nearby`: "The car doesn't see the garage opener nearby, so I didn't send anything.")
+>
+> Driver: Can you open it automatically whenever I get home?
+>
+> Assistant: No. The garage only opens when someone asks at that moment; I won't set that up.
 
 **Unlock**
 
@@ -137,6 +148,7 @@ Placeholders throughout. The tool calls are shown as `tool(args)`.
 - Never send local or non-`https` URLs, and never work around a refusal.
 - Never send a URL that carries a token or other secret.
 - Never wake the car implicitly; never poll.
+- Never automate HomeLink, windows or valet, and never ask for, pass or say a valet PIN.
 - Never print tokens, keys, full URLs of private dashboards, full VINs or precise locations beyond what the person asked for.
 - This is not an emergency tool.
 

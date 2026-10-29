@@ -19,7 +19,7 @@ export const TAG = {
 } as const;
 
 /** CarServer VehicleAction oneof members used here (community-documented, not in the official protos). */
-export const VEHICLE_ACTION = { DASHCAM_SAVE_CLIP: 47, VIDEO_REQUEST: 57 } as const;
+export const VEHICLE_ACTION = { DASHCAM_SAVE_CLIP: 47, VIDEO_REQUEST: 57, BOOMBOX: 64 } as const;
 
 /** UniversalMessage.MessageFault_E names (subset kept short; unknown numbers are shown as fault_<n>). */
 export const MESSAGE_FAULTS: Record<number, string> = {
@@ -45,6 +45,18 @@ export function encodeVehicleAction(oneofField: number, inner: ProtoWriter): Buf
 /** Action for VehicleAction.videoRequestAction (57): VideoRequestAction { string url = 1 }. */
 export function encodeVideoRequestAction(url: string): Buffer {
   return encodeVehicleAction(VEHICLE_ACTION.VIDEO_REQUEST, new ProtoWriter().string(1, url));
+}
+
+/**
+ * Action for VehicleAction.boomboxAction (64): BoomboxAction { uint32 sound = 1 }. Field numbers from
+ * Teslemetry/tesla-protocol (Apache-2.0, marked TESLEMETRY-EXT there; not in Tesla's published protos).
+ * Sound ids per Tesla's Fleet API docs (remote_boombox): 0 = random fart, 2000 = locate ping.
+ * Proto3 omits a zero scalar, so sound 0 encodes as an empty BoomboxAction (same bytes as Go's marshal).
+ */
+export function encodeBoomboxAction(sound: number): Buffer {
+  const inner = new ProtoWriter();
+  if (sound !== 0) inner.uint32(1, sound);
+  return encodeVehicleAction(VEHICLE_ACTION.BOOMBOX, inner);
 }
 
 /** Action for VehicleAction.dashcamSaveClipAction (47): empty message. */

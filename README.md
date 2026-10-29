@@ -92,6 +92,9 @@ Use the smallest scopes: read-only `openid offline_access vehicle_device_data ve
 | `TESLA_FLEET_VIDEO_HOST_ALLOWLIST` | no | Comma-separated hosts `play_video_on_screen` may send without a second approval (`video.example.com,*.cdn.example.com`; `*.` = subdomains only; `host:port` to allow a non-default port, which is otherwise always refused). Unset = every host needs `allow_unlisted_host=true` |
 | `TESLA_FLEET_AUDIT_LOG` | no | JSONL audit log for experimental signed commands (default `audit.jsonl` next to the token store, kept `0600` in a `0700` folder; full VIN for cars confirmed on the account, URL host + keyed path hash only; salt in `<log>.salt`) |
 | `TESLA_FLEET_AUDIT_FULL_VIN` | no | Audit lines record the **full VIN** of a car confirmed on the account (picked from the vehicle list or after the online check). **On by default**; `0`/`false`/`no`/`off` keeps the last 6 (an unrecognised value also keeps the last 6, with a warning). A VIN the caller passed that isn't confirmed yet (dry-runs, early refusals, failed checks) is always cut to the last 4. |
+| `TESLA_FLEET_ENABLE_VALET` | no | **Opt-in, default off.** `1`/`true`/`yes`/`on` lists `set_valet_mode` and `reset_valet_pin` (read-only must also be off). Anything else, including an unrecognised value, keeps them hidden and refused |
+| `TESLA_FLEET_VALET_PIN` | valet only | The 4-digit Valet Mode PIN used by `set_valet_mode` on. **Secret:** keep it in your secret store; it is never a tool argument and is never logged, echoed or shown in a preview; **never commit** |
+| `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` | no | **Opt-in, default off.** `1`/`true`/`yes`/`on` lists the EXPERIMENTAL `dashcam_save_clip` and `remote_boombox` (signed locally with `TESLA_FLEET_COMMAND_KEY_FILE`; read-only must also be off) |
 
 **Aliases.** If your secrets manager or env loader already exports `TESLA_FLEET_CLIENT_ID`, `TESLA_FLEET_CLIENT_SECRET`, `TESLA_FLEET_PROXY_URL` or `TESLA_FLEET_PROXY_CA_FILE`, the server and the auth helper accept them (they are also declared as optional plugin variables). When both names are set, the primary `TESLA_*` name wins.
 
@@ -122,15 +125,20 @@ The server runs for one owner and their own car, so `get_location` is listed by 
 
 ## Tools
 
-Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_status`, `get_vehicle_snapshot`, and `get_location` (on by default; coarse unless `precision=precise`).
+Read (no confirm; never wake the vehicle): `describe_boundary`, `get_api_usage`, `api_status`, `list_vehicles`, `get_vehicle_state`, `get_fleet_status`, `get_battery_charge`, `get_climate`, `get_closures`, `get_tires`, `get_vehicle_status`, `get_security_status`, `get_vehicle_snapshot`, `get_media_state`, `get_schedules`, and `get_location` (on by default; coarse unless `precision=precise`).
 
-Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate) and `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366). If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
+- `get_climate` also shows steering wheel heat level and auto, auto seat climate (left/right), rear seat heaters and the cabin overheat activation temperature; `get_battery_charge` shows `charge_current_request_max` and scheduled-charging state.
+- `get_security_status` (also a snapshot section, `security`): Valet Mode on/off and whether a valet PIN is needed, Speed Limit Mode (active, current/min/max limit, PIN set) and whether a HomeLink device is nearby. Never a PIN value.
+- `get_media_state` (live only; cached data has no media): now playing, playback status, source and volume.
+- `get_schedules` (live only): charge and preconditioning schedules with day names and HH:MM times; schedule locations are left out. Read-only: schedules are never changed by this server.
+
+Energy-site reads (no confirm; need the `energy_device_data` scope): `list_energy_sites`, `get_energy_live_status` (solar / battery / home / grid power, battery %, grid and island status, storm watch, plus Wall Connector state and power from the site's `wall_connectors` list), `get_energy_site_info` (backup reserve, operation mode, storm watch, export rule, battery count, nameplate), `get_energy_history` (`kind=energy` totals or `kind=backup` events for a bounded date range: `period=day` up to 31 days, `week` up to 92, `month`/`year` up to 366) and `get_wall_connector_charge_history` (`telemetry_history?kind=charge`, up to 31 days: session count, total energy added and, on request, the sessions; Tesla does not document the session fields, so they are passed through with location-like fields dropped at every depth). If you already have a local gateway integration, it gives the same live values with no API cost; prefer it for polling.
 
 Ownership reads (no confirm; never wake the vehicle): `get_recent_alerts` (recent vehicle alerts), `get_release_notes` (firmware release notes; images left out), `get_service_status` (service center status, estimated completion and visit number from `service_data`; `otherKeys` lists up to 20 names of any other fields Tesla returned, names only and never their values, so new fields are visible without being passed through), `get_warranty` (active, upcoming and expired coverage from `dx/warranty/details`) and `get_recalls` (see below). `get_vehicle_status` (also a `get_vehicle_snapshot` section, `status`) shows the firmware version, a pending or in-progress software update (version, download and install %), the odometer (mi and km) and service mode; `get_tires` adds psi below the recommended cold pressure when the car reports it.
 
 `get_recalls`: the Fleet API has no recalls endpoint, so this reads the public NHTSA recalls API by make, model and model year, which are decoded from the VIN on your machine. **Neither the VIN nor the token is sent to NHTSA**, and the call is not Fleet API usage. Results cover the model year, not the exact car; the Tesla app shows whether a recall applies to and is done on a specific car. The optional `model` argument accepts only `Model S`, `Model 3`, `Model X`, `Model Y` or `Cybertruck` (case-insensitive); anything else is refused with `invalid_arguments` before any call, and a VIN whose first three characters are not a Tesla manufacturer code is not decoded. NHTSA calls are also limited locally (at most one every 5 s and 20 per rolling hour, on top of the 6 h cache); over the limit, `rate_limited_locally` is returned and nothing is sent. To turn NHTSA off entirely, set `TESLA_FLEET_DISABLE_NHTSA=1`.
 
-Tool counts: **22** in the default read-only mode (18 vehicle reads including `get_location` + 4 energy reads), **49** with `TESLA_FLEET_READ_ONLY` off (+ 22 vehicle commands + 4 energy commands + the experimental `play_video_on_screen`); one fewer each with location turned off, and one fewer each with `TESLA_FLEET_DISABLE_NHTSA` on.
+Tool counts: **26** in the default read-only mode (21 vehicle reads including `get_location` + 5 energy reads), **66** with `TESLA_FLEET_READ_ONLY` off (+ 35 vehicle commands + 4 energy commands + the experimental `play_video_on_screen`), and **70** with both opt-ins on (+ 2 valet commands with `TESLA_FLEET_ENABLE_VALET`, + 2 experimental extras with `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS`); one fewer each with location turned off, and one fewer each with `TESLA_FLEET_DISABLE_NHTSA` on.
 
 Section reads default to `vehicle_data_cached` (works while asleep, may be hours old; age is reported). `live=true` makes one live `vehicle_data` call **only if the vehicle is already online**. `get_vehicle_snapshot` batches sections into one call.
 
@@ -141,10 +149,21 @@ Vehicle commands (hidden unless read-only is explicitly off; signed by your prox
 | Area | Tools |
 |---|---|
 | Wake | `wake_vehicle` |
-| Climate | `climate_warm_up` (preset), `climate_start`, `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection` |
-| Security | `door_lock`, `door_unlock`, `actuate_trunk`, `set_sentry_mode`, `flash_lights`, `honk_horn` |
+| Climate | `climate_warm_up` (preset), `climate_start`, `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`, `set_cop_temp` (`low`/`medium`/`high` = 30/35/40 °C), `set_climate_keeper_mode` (`off`/`on`/`dog`/`camp`), `set_auto_seat_climate` (driver/passenger, on/off) |
+| Security | `door_lock`, `door_unlock`, `actuate_trunk`, `set_sentry_mode`, `flash_lights`, `honk_horn`, `window_control` (`vent`/`close`), `trigger_homelink` |
 | Charging | `charge_start`, `charge_stop`, `set_charge_limit` (50-100), `set_charging_amps` (1-48; the car caps it), `charge_port_door_open`, `charge_port_door_close` |
-| Navigation | `share_navigation` |
+| Navigation | `share_navigation` (address text or lat+lon) |
+| Media | `media_toggle_playback`, `media_next_track`, `media_prev_track`, `media_next_fav`, `media_prev_fav`, `media_volume_up`, `media_volume_down`, `adjust_volume` (0-10; out of range is refused) |
+| Valet (opt-in) | `set_valet_mode` (on/off), `reset_valet_pin`; only with `TESLA_FLEET_ENABLE_VALET` |
+
+Notes on the 0.6.0 commands (request parameters follow what the stock `tesla-http-proxy` reads in `pkg/proxy/command.go`):
+
+- **`share_navigation` with lat/lon** is sent through `navigation_request` as the text `lat,lon`. Earlier versions posted coordinates to `navigation_gps_request`, which the stock proxy has no handler for (it answers `invalid_command`); `navigation_request` is one of the share endpoints the proxy forwards to the Fleet API. **Not field-tested yet:** whether the car resolves the `lat,lon` text the same way as an address. Pass either `destination` or `lat`+`lon`; both together are refused.
+- **`trigger_homelink`** is for a person who asks right now. Never from a routine, schedule, geofence or arrival trigger. Before sending, one live read checks that the car reports a HomeLink device nearby (`homelink_nearby`); otherwise it is refused. `lat`/`lon` are the car's position; omit both to use the car's live location (needs location on). Coordinates are never echoed.
+- **`window_control`** needs an explicit `vin`. `vent` is sent only when a live read shows the car in Park (`shift_state` `P`, or `shift_state` explicitly null with `speed` 0 or null); anything else (no `drive_state`, an empty or null reply, no `shift_state`, null gear with no speed field, or a failed read) is refused with `gear_unknown`, and a gear other than P (or null gear while moving) with `not_parked`. `close` has no pre-check.
+- **`set_cop_temp`**: Tesla's docs number the levels 0/1/2, but the stock proxy passes `cop_temp` straight into the protocol enum where 0 is "unspecified" and 1/2/3 are low/medium/high. The tool takes a name and sends 1/2/3 to cars that use signed commands, or the docs' 0/1/2 to cars that don't (from `fleet_status`). If that is unknown, it refuses.
+- **Valet**: on uses the PIN from `TESLA_FLEET_VALET_PIN` (never an argument: `pin`/`password`-like argument names are refused in any case or spelling; never shown, and scrubbed from every command result and error, including a proxy reply that echoes the request); off and `reset_valet_pin` send no PIN. The car must be in Park to turn it on; the PIN can only be reset while Valet Mode is off.
+- Not added: **auto steering wheel heat**. Tesla's docs list `remote_auto_steering_wheel_heat_climate_request`, but the stock proxy has no handler for it and Tesla's published protos have no action for it, so there is nothing verifiable to sign. Its state is readable in `get_climate`.
 
 Energy-site commands (same gates; sent unsigned, directly to the Fleet API, scope `energy_cmds`; no command proxy needed, verified live): `set_backup_reserve` (0-100 %), `set_operation_mode` (`self_consumption` or `autonomous`), `set_storm_mode` (on/off), `set_grid_import_export` (`customer_preferred_export_rule` `pv_only`/`battery_ok`/`never` and/or `disallow_charge_from_grid_with_solar_installed`). A successful call returns an empty `result` (`{}`); an empty (0-byte or whitespace-only) body, `{response: {}}`, `{code: 201, message: "Updated"}` (shown in some docs) and other plain result objects are also success. Every result carries `rawShape` (`empty`, `object`, `response-wrapped`, `null`, `string`, `array` or `other`; shape only, never values) so you can see what Tesla returned. An `error` key, `result: false` (the `reason` is surfaced) or a code of 400+ is reported as `rejected` (`sent: true`); a non-object body is `state_unknown`. Neither is retried. Read the new value back with `get_energy_site_info`.
 
@@ -156,7 +175,7 @@ Every command, vehicle or energy:
 - is **absent from `tools/list` and refused** unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed);
 - returns a **dry-run preview** (endpoint and body, zero network calls) unless called with `confirm=true` **and** `user_request` (a short quote of the human's request in the current conversation);
 - validates every parameter **before any network call**;
-- with `TESLA_FLEET_DRY_RUN=1`, goes through all of the above and returns the exact request (`wouldSend`, VIN masked to the last 4, navigation destination not echoed) without sending anything; use this for a first run;
+- with `TESLA_FLEET_DRY_RUN=1`, goes through all of the above and returns the exact request (`wouldSend`, VIN masked to the last 4, navigation destination, coordinates and the valet PIN not echoed) without sending anything; use this for a first run;
 - is never retried automatically. If the request may have reached the car or site (timeout, 408, any 5xx, or a connection reset after the request started) the result is `state_unknown` with `sent: "unknown"` and the read to use; failures before connecting (refused, DNS, TLS) are `sent: false`.
 
 Vehicle commands additionally:
@@ -169,13 +188,17 @@ Command scopes are **opt-in** in the auth helper: `url --commands` (or `TESLA_AU
 
 `door_unlock` and `actuate_trunk` require an explicit `vin`. Local rate limits stay under the documented per-vehicle limits (data 60/min, commands 30/min, wakes 3/min).
 
+### Experimental, opt-in: `dashcam_save_clip`, `remote_boombox`
+
+Listed only when read-only is off **and** `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` is on. The stock proxy can't send either (no dashcam endpoint; `remote_boombox` answers "command not implemented"), so they are signed locally like `play_video_on_screen`, with the same key, gates, audit log and 2 billed requests. `dashcam_save_clip` (VehicleAction 47) was field-tested once. `remote_boombox` (VehicleAction 64) plays `fart` (sound id 0) or `locate_ping` (sound id 2000), the two ids in Tesla's Fleet API docs, and nothing else; it is not field-tested. Both action field numbers are community-documented (Teslemetry/tesla-protocol), not in Tesla's published protos.
+
 ### Experimental: `play_video_on_screen`
 
 **EXPERIMENTAL** (title "Open URL on car screen"; field-tested on one car, firmware 2026.38.x). Asks the car to open an https URL on its screen with CarServer `videoRequestAction` (field 57, community-documented, not in Tesla's published protos). Stock `tesla-http-proxy` cannot send it, so the server signs the message itself with the virtual key (`TESLA_FLEET_COMMAND_KEY_FILE`, only on the host that holds the key) and posts it to the Fleet API's `/api/1/vehicles/{VIN}/signed_command` (same Fleet API host as reads; no new endpoint). Same gates as every command (hidden unless read-only is off, dry-run without `confirm`, `user_request`, online + paired checks, no auto-wake, no retry), plus: `https` public host names only (no IPs, localhost, private names or credentials, max 2048 characters), a host allowlist (`TESLA_FLEET_VIDEO_HOST_ALLOWLIST`; other hosts need `allow_unlisted_host=true` after the user approves that host), and an audit log line for every call. Costs 2 billed command requests. Observed behaviour: video sites open in the player but do not auto-play; other https pages open in the car's web browser; the first send tends to come to the front, later ones may load silently in the browser; some sites are accepted but not shown; local http/IP addresses are refused by design. Details, field results, the audit format and what is unverified: [docs/EXPERIMENTAL-SIGNED-COMMANDS.md](docs/EXPERIMENTAL-SIGNED-COMMANDS.md). With it, command-mode tool counts are one higher.
 
 **Commands must never be sent from routines, schedules, triggers, webhooks or an agent's own initiative.** The `user_request` field and the skills enforce this as policy; the server cannot see who scheduled a run, so operators who allow unattended agents should keep the server read-only.
 
-Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, valet/PIN/speed limit, guest mode, sharing, HomeLink, windows, media, software update commands (scheduling or cancelling an install; reading update status is supported), off-grid vehicle charging reserve.
+Out of scope (TODO in `BACKLOG.md`): Fleet Telemetry streaming, remote start, PIN to Drive and Speed Limit Mode changes, guest mode, sharing, seat cooler writes, charge/precondition schedule writes, auto steering wheel heat (see above), software update commands (scheduling or cancelling an install; reading update status is supported), off-grid vehicle charging reserve. Left out on purpose: Teslemetry-only extras beyond the ones above.
 
 ## Usage counter (local estimate)
 
@@ -222,7 +245,7 @@ Use it only for **trusted local consumers on the same host** (for example a read
 |---|---|
 | `https://fleet-auth.prd.vn.cloud.tesla.com/oauth2/v3/token` | token refresh (and auth-helper code exchange) |
 | `https://auth.tesla.com/oauth2/v3/authorize` | opened by you in a browser via auth-helper |
-| `https://fleet-api.prd.na.vn.cloud.tesla.com`, `https://fleet-api.prd.eu.vn.cloud.tesla.com`, `https://fleet-api.prd.cn.vn.cloud.tesla.cn` | Fleet API reads, wake, fleet_status, region lookup |
+| `https://fleet-api.prd.na.vn.cloud.tesla.com`, `https://fleet-api.prd.eu.vn.cloud.tesla.com`, `https://fleet-api.prd.cn.vn.cloud.tesla.cn` | Fleet API reads, wake, fleet_status, region lookup, energy-site reads and commands, experimental signed commands (`signed_command`) |
 | your `TESLA_COMMAND_PROXY_URL` | signed commands |
 | `https://api.nhtsa.gov/recalls/recallsByVehicle` | `get_recalls` only: make, model and model year (no VIN, no token); never when `TESLA_FLEET_DISABLE_NHTSA` is on |
 
@@ -235,7 +258,8 @@ No other endpoints, no telemetry, no analytics. The plugin does not push a telem
 - Errors and tool output never include tokens or secrets; VINs appear as last 4 characters except where you passed them.
 - Revoke access any time: remove the key on the vehicle's Locks screen, or change third-party app access on your Tesla account. Delete the token store file to forget the refresh token.
 - You are the developer of record for your own app: follow the Fleet API Agreement, including its privacy, consent and data-deletion terms.
-- The experimental `play_video_on_screen` writes an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): the full VIN of a car confirmed on the account (last 4 before that; `TESLA_FLEET_AUDIT_FULL_VIN=0` for the last 6) and the URL host plus a keyed path hash (per-install salt in `<log>.salt`, `0600`) only, never the full URL, query, tokens or keys.
+- The valet PIN is read from `TESLA_FLEET_VALET_PIN` only when `set_valet_mode` on is sent; it is never stored, logged, echoed or returned.
+- The experimental signed commands (`play_video_on_screen`, and the opt-in `dashcam_save_clip` / `remote_boombox`) write an audit log (`TESLA_FLEET_AUDIT_LOG`, default `audit.jsonl` next to the token store): the full VIN of a car confirmed on the account (last 4 before that; `TESLA_FLEET_AUDIT_FULL_VIN=0` for the last 6) and the URL host plus a keyed path hash (per-install salt in `<log>.salt`, `0600`) only, never the full URL, query, tokens or keys.
 
 ## Event triggers and telemetry alerts (separate bridge)
 

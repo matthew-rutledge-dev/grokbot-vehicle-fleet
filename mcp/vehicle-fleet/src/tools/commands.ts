@@ -17,7 +17,11 @@ import type { ToolDef } from "./types.js";
 
 /** One POST to /api/1/vehicles/{vin}/command/{endpoint}. */
 export type Step = { endpoint: string; body: Record<string, unknown> };
-type Built = { steps: Step[]; preview?: Record<string, unknown> };
+/**
+ * preview.body (or preview.destination for navigation) replaces the step body in every preview and
+ * dry-run echo, so values that must not be echoed (coordinates, a PIN) never appear in output.
+ */
+export type Built = { steps: Step[]; preview?: Record<string, unknown> };
 
 type CommandSpec = {
   name: string;
@@ -28,6 +32,15 @@ type CommandSpec = {
   properties?: Record<string, unknown>;
   required?: string[];
   build?: (args: ToolArgs) => { body: Record<string, unknown>; preview?: Record<string, unknown> };
+  /**
+   * Optional send-time step (after the online + key-paired checks): reads state and refuses
+   * (LocalRefusal) or adjusts the body. Never runs for previews or TESLA_FLEET_DRY_RUN.
+   */
+  sendPlan?: (args: ToolArgs, vin: string, ctx: ToolContext, built: Built) => Promise<Built>;
+  /** Extra checks listed in previews (each costs at most one small read). */
+  extraChecks?: string[];
+  /** Notes shown in previews. */
+  notes?: string[];
   readBack: string;
 };
 
@@ -76,6 +89,95 @@ export function seatHeaterBody(position: number, level: number): Record<string, 
 }
 
 const ON_PROP = { on: { type: "boolean" } } as const;
+
+/** Both lat and lon, in range. */
+export function coords(a: ToolArgs): { lat: number; lon: number } {
+  const lat = num(a.lat, "lat");
+  const lon = num(a.lon, "lon");
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180) bad("lat/lon out of range");
+  return { lat, lon };
+}
+
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+/** navigation_request share body (Fleet API share format). */
+export function shareBody(text: string): Record<string, unknown> {
+  return { type: "share_ext_content_raw", locale: "en-US", timestamp_ms: String(Date.now()), value: { "android.intent.extra.TEXT": text } };
+}
+
+/**
+ * Cabin Overheat Protection level numbers. Tesla's Fleet API docs: 0/1/2 = low/medium/high. The stock
+ * tesla-http-proxy (pkg/proxy/command.go, set_cop_temp) passes cop_temp straight into the
+ * ClimateState.CopActivationTemp enum (vehicle.proto: 0 Unspecified, 1 Low, 2 Medium, 3 High), so a
+ * signed (proxy) command needs 1/2/3; the docs' 0/1/2 apply only where the proxy forwards the
+ * request unsigned (cars that do not take the Vehicle Command Protocol).
+ */
+export const COP_PROTO = { low: 1, medium: 2, high: 3 } as const;
+export const COP_REST = { low: 0, medium: 1, high: 2 } as const;
+function copLevel(v: unknown): keyof typeof COP_PROTO {
+  if (v !== "low" && v !== "medium" && v !== "high") bad("level must be low, medium or high");
+  return v as keyof typeof COP_PROTO;
+}
+
+/** set_climate_keeper_mode values (Fleet API docs and HvacClimateKeeperAction agree). */
+export const CLIMATE_KEEPER: Record<string, number> = { off: 0, on: 1, dog: 2, camp: 3 };
+/** AutoSeatClimateAction.AutoSeatPosition_E (FrontLeft 1, FrontRight 2). */
+export const AUTO_SEAT: Record<string, number> = { driver: 1, passenger: 2 };
+
+export const MIN_VOLUME = 0;
+export const MAX_VOLUME = 10;
+
+/**
+ * Gear check for vent (fails closed). "parked" only when drive_state is present and either
+ * shift_state === "P", or shift_state is explicitly null AND speed is 0 or null (a parked car
+ * often reports no gear). A missing/empty/null drive_state, a missing shift_state, or null gear
+ * without a speed field is "gear_unknown"; a gear other than P, or null gear with a non-zero speed,
+ * is "not_parked".
+ */
+export type ParkCheck = "parked" | "not_parked" | "gear_unknown";
+export function parkCheck(data: unknown): ParkCheck {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return "gear_unknown";
+  const ds = (data as Record<string, unknown>).drive_state;
+  if (!ds || typeof ds !== "object" || Array.isArray(ds)) return "gear_unknown";
+  const d = ds as Record<string, unknown>;
+  if (!("shift_state" in d)) return "gear_unknown";
+  const g = d.shift_state;
+  if (g === "P") return "parked";
+  if (g === null) {
+    if (!("speed" in d)) return "gear_unknown";
+    if (d.speed === 0 || d.speed === null) return "parked";
+    if (typeof d.speed === "number" && Number.isFinite(d.speed)) return "not_parked";
+    return "gear_unknown";
+  }
+  if (typeof g === "string" && g !== "") return "not_parked";
+  return "gear_unknown";
+}
+
+/** One live vehicle_data read for a send-time check; any failure refuses (fails closed). */
+async function liveOrRefuse(ctx: ToolContext, vin: string, endpoints: string[], code: string, what: string): Promise<Record<string, unknown>> {
+  try {
+    return (await ctx.fleet.vehicleDataLive(vin, endpoints)).data;
+  } catch (e) {
+    if (e instanceof LocalRefusal) throw e;
+    if (e instanceof FleetApiError && e.info.code === "missing_scope") throw e;
+    throw new LocalRefusal(code, `${what}; nothing was sent.`, "Try again in a moment; the check is required before this command.");
+  }
+}
+
+const MEDIA = [
+  ["media_toggle_playback", "Play or pause the current media."],
+  ["media_next_track", "Skip to the next track."],
+  ["media_prev_track", "Go back to the previous track."],
+  ["media_next_fav", "Go to the next favorite."],
+  ["media_prev_fav", "Go to the previous favorite."],
+  ["media_volume_up", "Turn the volume up one step."],
+  ["media_volume_down", "Turn the volume down one step."],
+] as const;
+
+const MEDIA_SPECS: CommandSpec[] = MEDIA.map(([name, d]) => ({
+  name, endpoint: name, scope: "vehicle_cmds", readBack: "get_media_state",
+  description: `${d} The car needs someone in it and mobile access on.`,
+}));
 
 const SPECS: CommandSpec[] = [
   {
@@ -199,29 +301,147 @@ const SPECS: CommandSpec[] = [
   },
   {
     name: "share_navigation", endpoint: "navigation_request", scope: "vehicle_cmds", readBack: "get_vehicle_state",
-    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon.",
+    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon. Both go through navigation_request (the share endpoint the stock proxy forwards to the Fleet API); coordinates are shared as the text \"lat,lon\" for the car's navigation to resolve (not field-tested yet: ask the person whether the car showed the place). Pass one or the other; both is refused.",
     properties: {
       destination: { type: "string", description: "Address or place name." },
-      lat: { type: "number" },
-      lon: { type: "number" },
+      lat: { type: "number", description: "Latitude (-90 to 90). Pass with lon instead of destination." },
+      lon: { type: "number", description: "Longitude (-180 to 180)." },
     },
     build: (a) => {
-      if (typeof a.lat === "number" || typeof a.lon === "number") {
-        const lat = num(a.lat, "lat");
-        const lon = num(a.lon, "lon");
-        if (Math.abs(lat) > 90 || Math.abs(lon) > 180) bad("lat/lon out of range");
-        return { body: { lat, lon, order: 0 }, preview: { endpoint: "navigation_gps_request", destination: "[coordinates]" } };
+      let text: string;
+      let shown: string;
+      const hasCoords = a.lat !== undefined || a.lon !== undefined;
+      if (hasCoords && a.destination !== undefined) bad("pass either destination text or lat+lon, not both");
+      if (hasCoords) {
+        const { lat, lon } = coords(a);
+        text = `${round6(lat)},${round6(lon)}`;
+        shown = "[coordinates, not echoed]";
+      } else {
+        if (typeof a.destination !== "string" || !a.destination.trim()) bad("pass destination text or lat+lon");
+        text = (a.destination as string).trim();
+        shown = "[address text, not echoed]";
       }
-      if (typeof a.destination !== "string" || !a.destination.trim()) bad("pass destination text or lat+lon");
-      return {
-        body: {
-          type: "share_ext_content_raw",
-          locale: "en-US",
-          timestamp_ms: String(Date.now()),
-          value: { "android.intent.extra.TEXT": (a.destination as string).trim() },
-        },
-        preview: { destination: "[address text, not echoed]" },
-      };
+      return { body: shareBody(text), preview: { destination: shown } };
+    },
+  },
+  {
+    name: "trigger_homelink", endpoint: "trigger_homelink", scope: "vehicle_cmds", readBack: "get_security_status",
+    description: "Press HomeLink (garage door / gate) once. ONLY when the person explicitly asks right now: never from a routine, schedule, geofence, arrival trigger or an agent's own idea. Before sending, one live read checks that the car reports a HomeLink device nearby (refused otherwise). lat/lon = where the car is (the car checks it is near the programmed device); omit both to use the car's own live location (needs location on). Coordinates are never echoed.",
+    properties: {
+      lat: { type: "number", description: "Car latitude. Omit lat and lon to use the vehicle's live location." },
+      lon: { type: "number", description: "Car longitude." },
+    },
+    extraChecks: ["live vehicle_state: homelink_nearby must be true (1 data read; also drive_state + location_data when lat/lon are omitted)"],
+    build: (a) => {
+      if (a.lat === undefined && a.lon === undefined) {
+        return { body: {}, preview: { body: { lat: "[vehicle location, read at send time]", lon: "[vehicle location, read at send time]" } } };
+      }
+      const { lat, lon } = coords(a);
+      return { body: { lat, lon }, preview: { body: { lat: "[coordinates, not echoed]", lon: "[coordinates, not echoed]" } } };
+    },
+    sendPlan: async (a, vin, ctx, built) => {
+      const useCar = a.lat === undefined && a.lon === undefined;
+      if (useCar && !ctx.config.locationEnabled) {
+        throw new LocalRefusal("location_required", "trigger_homelink without lat/lon needs the vehicle's location, but location is off; nothing was sent.",
+          "Pass lat and lon, or turn location on (TESLA_FLEET_ENABLE_LOCATION).");
+      }
+      const endpoints = useCar ? ["vehicle_state", "location_data", "drive_state"] : ["vehicle_state"];
+      const data = await liveOrRefuse(ctx, vin, endpoints, "homelink_state_unknown", "Could not read whether a HomeLink device is nearby");
+      const vs = (data.vehicle_state ?? {}) as Record<string, unknown>;
+      if (vs.homelink_nearby !== true) {
+        throw new LocalRefusal("homelink_not_nearby",
+          vs.homelink_nearby === false
+            ? "The car does not report a HomeLink device nearby; nothing was sent."
+            : "The car did not report HomeLink state (no HomeLink, or unknown); nothing was sent.",
+          "HomeLink only works next to a programmed device. Ask the person to use the button on the car's screen.");
+      }
+      if (!useCar) return built;
+      const d = (data.drive_state ?? {}) as Record<string, unknown>;
+      if (typeof d.latitude !== "number" || typeof d.longitude !== "number") {
+        throw new LocalRefusal("location_unavailable", "The car's location was not available; nothing was sent.", "Pass lat and lon instead.");
+      }
+      return { ...built, steps: [{ endpoint: "trigger_homelink", body: { lat: d.latitude, lon: d.longitude } }] };
+    },
+  },
+  {
+    name: "window_control", endpoint: "window_control", scope: "vehicle_cmds", readBack: "get_closures",
+    requireExplicitVin: true,
+    description: "Vent (open a crack) or close all windows. Needs an explicit vin. vent is refused unless a live read shows the car in Park (shift_state P, or no gear reported and not moving); if the gear cannot be read, vent is refused. close has no pre-check.",
+    properties: { command: { type: "string", enum: ["vent", "close"] } },
+    required: ["command"],
+    extraChecks: ["vent only: live drive_state shift_state must be P, or explicitly null with speed 0/null; anything else is refused (1 data read)"],
+    build: (a) => {
+      if (a.command !== "vent" && a.command !== "close") bad("command must be vent or close");
+      return { body: { command: a.command } };
+    },
+    sendPlan: async (a, vin, ctx, built) => {
+      if (a.command !== "vent") return built;
+      const data = await liveOrRefuse(ctx, vin, ["drive_state"], "gear_unknown", "Could not read the gear, so vent was not sent");
+      const check = parkCheck(data);
+      if (check === "gear_unknown") {
+        throw new LocalRefusal("gear_unknown", "Could not confirm the car is in Park (no gear reported), so vent was not sent; nothing was sent.",
+          "Venting is only sent when a live read shows the car in Park.");
+      }
+      if (check === "not_parked") {
+        const d = (data as Record<string, unknown>).drive_state as Record<string, unknown>;
+        throw new LocalRefusal("not_parked", "The car is not in Park, so the windows were not vented; nothing was sent.",
+          "Venting is only sent while the car is parked.", { shift_state: d.shift_state ?? null });
+      }
+      return built;
+    },
+  },
+  {
+    name: "set_cop_temp", endpoint: "set_cop_temp", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Set the Cabin Overheat Protection activation temperature: low (30 C / 90 F), medium (35 C / 95 F) or high (40 C / 100 F). Does not turn COP on (use set_cabin_overheat_protection).",
+    properties: { level: { type: "string", enum: ["low", "medium", "high"] } },
+    required: ["level"],
+    notes: ["cop_temp shown for a car that takes signed commands (proxy enum: low 1, medium 2, high 3). A car that does not take them gets the Fleet API docs' numbers (low 0, medium 1, high 2), chosen at send time from fleet_status; unknown = refused."],
+    build: (a) => {
+      const level = copLevel(a.level);
+      return { body: { cop_temp: COP_PROTO[level] }, preview: { body: { cop_temp: COP_PROTO[level] }, copLevel: level } };
+    },
+    sendPlan: async (a, vin, ctx, built) => {
+      const level = copLevel(a.level);
+      const fs = await ctx.fleet.fleetStatus(vin);
+      if (fs.commandProtocolRequired === true) return built;
+      if (fs.commandProtocolRequired === false) {
+        return { ...built, steps: [{ endpoint: "set_cop_temp", body: { cop_temp: COP_REST[level] } }] };
+      }
+      throw new LocalRefusal("cop_mapping_unknown",
+        "Could not tell whether this car takes signed commands, so the COP level number is ambiguous; nothing was sent.",
+        "Check get_fleet_status (vehicle_command_protocol_required) and try again.");
+    },
+  },
+  {
+    name: "set_climate_keeper_mode", endpoint: "set_climate_keeper_mode", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Climate keeper: off, on (Keep mode), dog (Dog mode) or camp (Camp mode). Keeps climate running while parked; uses battery.",
+    properties: { mode: { type: "string", enum: Object.keys(CLIMATE_KEEPER) } },
+    required: ["mode"],
+    build: (a) => {
+      if (typeof a.mode !== "string" || !Object.hasOwn(CLIMATE_KEEPER, a.mode)) bad("mode must be off, on, dog or camp");
+      return { body: { climate_keeper_mode: CLIMATE_KEEPER[a.mode as string] } };
+    },
+  },
+  {
+    name: "set_auto_seat_climate", endpoint: "remote_auto_seat_climate_request", scope: "vehicle_cmds", readBack: "get_climate",
+    description: "Turn automatic seat heating/cooling on or off for the driver or front passenger seat. Climate must be on.",
+    properties: { seat: { type: "string", enum: ["driver", "passenger"] }, ...ON_PROP },
+    required: ["seat", "on"],
+    build: (a) => {
+      if (a.seat !== "driver" && a.seat !== "passenger") bad("seat must be driver or passenger");
+      return { body: { auto_seat_position: AUTO_SEAT[a.seat as string], auto_climate_on: bool(a.on, "on") } };
+    },
+  },
+  ...MEDIA_SPECS,
+  {
+    name: "adjust_volume", endpoint: "adjust_volume", scope: "vehicle_cmds", readBack: "get_media_state",
+    description: `Set the media volume to an absolute level ${MIN_VOLUME}-${MAX_VOLUME} (out of range is refused). The car needs someone in it and mobile access on.`,
+    properties: { volume: { type: "number", minimum: MIN_VOLUME, maximum: MAX_VOLUME } },
+    required: ["volume"],
+    build: (a) => {
+      const v = num(a.volume, "volume");
+      if (v < MIN_VOLUME || v > MAX_VOLUME) bad(`volume must be from ${MIN_VOLUME} to ${MAX_VOLUME}`);
+      return { body: { volume: v } };
     },
   },
 ];
@@ -350,8 +570,12 @@ function needsOutsideTemp(args: ToolArgs): boolean {
   return (args.seat_heat ?? "auto") === "auto" || (args.defrost ?? "auto") === "auto";
 }
 
-type SendOpts = {
+export type SendOpts = {
   name: string;
+  /** Extra send-time checks listed in previews. */
+  extraChecks?: string[];
+  /** Extra notes shown in previews. */
+  notes?: string[];
   scope: string;
   readBack: string;
   requireExplicitVin?: boolean;
@@ -361,13 +585,18 @@ type SendOpts = {
 };
 
 /** Dry-run request echo: VIN masked to the last 4, navigation destination not echoed. */
+export function previewBody(s: Step, preview?: Record<string, unknown>): Record<string, unknown> {
+  if (preview?.body && typeof preview.body === "object") return preview.body as Record<string, unknown>;
+  return preview?.destination ? { destination: preview.destination } : s.body;
+}
+
 function requestOf(ctx: ToolContext, vin: string | undefined, s: Step, preview?: Record<string, unknown>) {
   const base = ctx.config.proxyUrl ?? "<TESLA_COMMAND_PROXY_URL>";
-  const body = preview?.destination ? { destination: preview.destination } : s.body;
+  const body = previewBody(s, preview);
   return { method: "POST", url: `${base}/api/1/vehicles/${vin ? maskVin(vin) : "{vin}"}/command/${s.endpoint}`, body };
 }
 
-async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promise<Record<string, unknown>> {
+export async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promise<Record<string, unknown>> {
   if (args.confirm !== true) {
     const p = o.previewPlan();
     const vin = offlineVin(args, ctx, o.requireExplicitVin);
@@ -377,11 +606,12 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
       sent: false,
       command: o.name,
       ...(single
-        ? { endpoint: `POST /api/1/vehicles/{vin}/command/${p.steps[0].endpoint}`, body: p.preview?.destination ? { destination: p.preview.destination } : p.steps[0].body }
+        ? { endpoint: `POST /api/1/vehicles/{vin}/command/${p.steps[0].endpoint}`, body: previewBody(p.steps[0], p.preview) }
         : { steps: p.steps.map((s) => ({ endpoint: s.endpoint, body: s.body })), ...(p.conditional?.length ? { conditionalSteps: p.conditional } : {}) }),
       vinLast4: vin ? vin.slice(-4) : o.requireExplicitVin ? "(explicit vin required)" : "(resolved at send time)",
       proxyConfigured: Boolean(ctx.config.proxyUrl),
-      checksBeforeSend: ["vehicle online (no auto-wake)", "virtual key paired", "local rate limit"],
+      checksBeforeSend: ["vehicle online (no auto-wake)", "virtual key paired", "local rate limit", ...(o.extraChecks ?? [])],
+      ...(o.notes ? { notes: o.notes } : {}),
       estimatedBillableCalls: `${p.steps.length + (p.conditional?.length ?? 0)} command(s) max + up to 3 small reads (state, fleet_status, cached data)`,
       toSend: "Ask the user to confirm, then call again with confirm=true and user_request.",
     };
@@ -396,8 +626,9 @@ async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts): Promis
       wouldSend: p.steps.map((s) => requestOf(ctx, vin, s, p.preview)),
       vinLast4: vin ? vin.slice(-4) : "(resolved at send time)",
       ...(p.conditional?.length ? { conditionalSteps: p.conditional.map((s) => ({ ...requestOf(ctx, vin, s), when: s.when })) } : {}),
-      wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)"],
+      wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)", ...(o.extraChecks ?? [])],
       proxyConfigured: Boolean(ctx.config.proxyUrl),
+      ...(o.notes ? { notes: o.notes } : {}),
       note: "Validated only; no network call was made.",
     };
   }
@@ -460,6 +691,7 @@ function commandTool(spec: CommandSpec): ToolDef {
     const endpoint = (b.preview?.endpoint as string | undefined) ?? spec.endpoint;
     return { steps: [{ endpoint, body: b.body }], preview: b.preview };
   };
+  const sendPlan = spec.sendPlan;
   return {
     kind: "command",
     tool: {
@@ -475,7 +707,9 @@ function commandTool(spec: CommandSpec): ToolDef {
       const built = build(args); // validate before anything else
       return runVehicle(args, ctx, {
         name: spec.name, scope: spec.scope, readBack: spec.readBack, requireExplicitVin: spec.requireExplicitVin,
-        plan: async () => built, previewPlan: () => built,
+        extraChecks: spec.extraChecks,
+        notes: spec.notes,
+        plan: async (vin) => (sendPlan && vin ? sendPlan(args, vin, ctx, built) : built), previewPlan: () => built,
       });
     },
   };

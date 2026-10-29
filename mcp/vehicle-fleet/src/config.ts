@@ -55,6 +55,9 @@ export const ENV = {
   VIDEO_HOST_ALLOWLIST: "TESLA_FLEET_VIDEO_HOST_ALLOWLIST",
   AUDIT_LOG: "TESLA_FLEET_AUDIT_LOG",
   AUDIT_FULL_VIN: "TESLA_FLEET_AUDIT_FULL_VIN",
+  ENABLE_VALET: "TESLA_FLEET_ENABLE_VALET",
+  VALET_PIN: "TESLA_FLEET_VALET_PIN",
+  ENABLE_EXPERIMENTAL: "TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS",
 } as const;
 
 /** Defaults for the climate_warm_up preset (all overridable per call). */
@@ -198,6 +201,12 @@ export type Config = {
   auditLogPath: string;
   /** Audit lines record the full VIN of a car confirmed on the account (default true); false = last 6. */
   auditFullVin: boolean;
+  /** Opt-in (TESLA_FLEET_ENABLE_VALET, default off): set_valet_mode / reset_valet_pin listed (still needs read-only off). */
+  valetEnabled: boolean;
+  /** TESLA_FLEET_VALET_PIN is set (the value itself is read only at send time and never stored here). */
+  valetPinConfigured: boolean;
+  /** Opt-in (TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS, default off): dashcam_save_clip / remote_boombox listed. */
+  experimentalEnabled: boolean;
   /** Config problems found at start (no secret values). */
   problems: string[];
   /** Non-fatal warnings for stderr (no secret values). */
@@ -342,6 +351,9 @@ export function loadConfig(env: Env = process.env): Config {
     videoHostAllowlist,
     auditLogPath,
     auditFullVin: resolveAuditFullVin(env, warnings),
+    valetEnabled: readOptInFlag(ENV.ENABLE_VALET, env),
+    valetPinConfigured: readEnv(ENV.VALET_PIN, env) !== undefined,
+    experimentalEnabled: readOptInFlag(ENV.ENABLE_EXPERIMENTAL, env),
     problems,
     warnings,
   });

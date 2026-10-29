@@ -11,6 +11,8 @@ No secrets in this file.
 - Pin `vehicle_data_cached` and TPMS field names/units against a redacted real response; add it as a fixture.
 - Confirm the pricing category of `GET /api/1/vehicles/{vin}` and `fleet_status` and adjust the dry-run cost estimate and the `other` bucket of `get_api_usage`.
 - Verify the `navigation_request` body shape against the current proxy.
+- Field-test (0.6.0): `share_navigation` with `lat`/`lon` (sent as `lat,lon` text via `navigation_request`), `trigger_homelink`, `window_control`, the media commands, `set_cop_temp` level mapping on a signed-command car, `set_climate_keeper_mode`, `set_auto_seat_climate`, valet on/off/reset, `remote_boombox`. Pin the `telemetry_history?kind=charge` session fields against a redacted real response.
+- Auto steering wheel heat (`remote_auto_steering_wheel_heat_climate_request`): add only if the stock proxy or Tesla's published protos gain it.
 - Fleet Telemetry (separate project; needs a public server).
 - Marketplace submission (xAI plugin marketplace remote entry; Cursor) after the repo is public and a fresh-clone walk passes.
 

@@ -1,6 +1,6 @@
 ---
 name: vehicle-fleet-in-car
-description: use this when you are talking with someone who is in or at the car and they ask for something on the car's screen (open a webpage, video or dashboard), navigation, climate, seat or wheel heat, lock or unlock, trunk or frunk, sentry, charging, Powerwall, the garage door, windows, dashcam save, or a pop-up on the screen, to pick the right vehicle-fleet tool or say it is not supported
+description: use this when you are talking with someone who is in or at the car and they ask for something on the car's screen (open a webpage, video or dashboard), navigation, climate, seat or wheel heat, lock or unlock, trunk or frunk, sentry, charging, Powerwall, the garage door, windows, music or volume, dog or camp mode, valet mode, dashcam save, the boombox, or a pop-up on the screen, to pick the right vehicle-fleet tool or say it is not supported
 ---
 
 # Vehicle fleet: in-car assistant
@@ -10,8 +10,13 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 ## Quick map
 
 - Page or video on the screen: `play_video_on_screen` (EXPERIMENTAL). `https` public hosts only; unlisted hosts need a named approval and `allow_unlisted_host=true`. It opens the link but does not press play; video needs Park. After `ok: true`, ask what the screen shows; if nothing, ask them to open the browser (hint from one field test, not guaranteed: later links can load in the background without coming to the front). Never send a URL that carries a token or other secret.
-- Navigation: `share_navigation` (destination text or lat+lon). Not for web links.
-- Climate: `climate_warm_up`, `climate_start` / `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`.
+- Navigation: `share_navigation` (destination text or lat+lon, not both). Not for web links. Coordinates as `lat,lon` text are not field-tested yet: ask whether the car showed the place.
+- Climate: `climate_warm_up`, `climate_start` / `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`, `set_cop_temp` (low/medium/high), `set_climate_keeper_mode` (off/on/dog/camp), `set_auto_seat_climate`.
+- Garage: `trigger_homelink` only when the person asks right now (omit lat/lon to use the car's location); refused unless the car sees a HomeLink device nearby. Never automate it.
+- Windows: `window_control` (`vent` only in Park, or `close`; explicit vin). Never automate it.
+- Media: `media_toggle_playback`, `media_next_track` / `media_prev_track`, `media_next_fav` / `media_prev_fav`, `media_volume_up` / `media_volume_down`, `adjust_volume` (0-10); `get_media_state` to see what is playing.
+- Valet (only if listed): `set_valet_mode` (explicit vin), `reset_valet_pin`. The PIN is on the server; never ask for or say it.
+- Experimental (only if listed): `dashcam_save_clip`, `remote_boombox` (`fart` / `locate_ping`).
 - Security: `door_lock`, `door_unlock` (explicit vin), `actuate_trunk` (explicit vin; frunk usually cannot close remotely), `set_sentry_mode`, `flash_lights`, `honk_horn`.
 - Charging: `charge_start` / `charge_stop`, `set_charge_limit`, `set_charging_amps`, `charge_port_door_open` / `_close`.
 - Powerwall: read `get_energy_site_info`, then `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export`.
@@ -19,7 +24,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 
 ## Not supported here (say so, do not improvise)
 
-Garage / HomeLink (Fleet API `trigger_homelink` needs the car's lat/lon; no tool yet; a Home Assistant tool only if it is already available and the person asks for it), windows, dashcam save, screen notifications or pop-ups, media controls, remote start, valet, speed limit, guest mode, software updates. Never reach for raw endpoints, scripts or another agent instead.
+Screen notifications or pop-ups, auto steering wheel heat, remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates; valet or dashcam/boombox when those tools are not listed (operator opt-in). Never reach for raw endpoints, scripts or another agent instead.
 
 ## Never
 
@@ -27,3 +32,4 @@ Garage / HomeLink (Fleet API `trigger_homelink` needs the car's lat/lon; no tool
 - Send local, `http://` or IP URLs, or work around a refusal.
 - Resend on `state_unknown` or because "nothing happened"; ask first.
 - Repeat full URLs, full VINs or precise locations.
+- Automate HomeLink, windows or valet (no arrival, geofence or schedule triggers), or ask for, pass or say a valet PIN.
