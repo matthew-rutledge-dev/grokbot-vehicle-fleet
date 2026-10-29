@@ -19,6 +19,7 @@ import { Http, type FetchLike } from "./http.js";
 import { RateLimiter } from "./ratelimit.js";
 import { READ_ONLY_ENV } from "./readonly.js";
 import { redactSecrets, redactShortSecrets } from "./redact.js";
+import { redactableValetPin } from "./tools/valet.js";
 import { jsonResult } from "./result.js";
 import { TokenStore } from "./tokenstore.js";
 import { findTool, isVisible, listTools, optInOn } from "./tools.js";
@@ -67,7 +68,9 @@ export function createServer(ctx: ToolContext): Server {
   // result:false reason), so every command result and every error body is scrubbed.
   const valetPin = () => readEnv(ENV.VALET_PIN, ctx.env);
   const secrets = () => [ctx.config.refreshTokenSeed, ...ctx.tokens.secretValues(), valetPin()];
-  const scrub = (body: unknown) => redactShortSecrets(JSON.parse(redactSecrets(JSON.stringify(body), secrets())), [valetPin()]);
+  // Only a well-formed 4-digit PIN is registered as a short secret (a malformed one is never sent).
+  const scrub = (body: unknown) =>
+    redactShortSecrets(JSON.parse(redactSecrets(JSON.stringify(body), secrets())), [redactableValetPin(valetPin())]);
   const server = new Server({ name: SERVER_NAME, version: VERSION }, { capabilities: { tools: {} } });
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: listTools(mode) }));

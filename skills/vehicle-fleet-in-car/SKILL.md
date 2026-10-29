@@ -10,7 +10,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 ## Quick map
 
 - Page or video on the screen: `play_video_on_screen` (EXPERIMENTAL). `https` public hosts only; unlisted hosts need a named approval and `allow_unlisted_host=true`. It opens the link but does not press play; video needs Park. After `ok: true`, ask what the screen shows; if nothing, ask them to open the browser (hint from one field test, not guaranteed: later links can load in the background without coming to the front). Never send a URL that carries a token or other secret.
-- Navigation: `share_navigation` (destination text or lat+lon, not both). Not for web links. Coordinates as `lat,lon` text are not field-tested yet: ask whether the car showed the place.
+- Navigation: `share_navigation` (destination text or lat+lon, not both). Not for web links. Coordinates as `lat,lon` text are not field-tested yet: ask whether the car showed the place. One destination per send: Supercharger-by-id and multi-stop routes are not supported.
 - Climate: `climate_warm_up`, `climate_start` / `climate_stop`, `set_temps`, `set_seat_heater`, `set_steering_wheel_heater`, `set_defrost_max`, `set_cabin_overheat_protection`, `set_cop_temp` (low/medium/high), `set_climate_keeper_mode` (off/on/dog/camp), `set_auto_seat_climate`.
 - Garage: `trigger_homelink` only when the person asks right now (omit lat/lon to use the car's location); refused unless the car sees a HomeLink device nearby. Never automate it.
 - Windows: `window_control` (`vent` only in Park, or `close`; explicit vin). Never automate it.
@@ -24,7 +24,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 
 ## Not supported here (say so, do not improvise)
 
-Screen notifications or pop-ups, auto steering wheel heat, remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates; valet or dashcam/boombox when those tools are not listed (operator opt-in). Never reach for raw endpoints, scripts or another agent instead.
+Screen notifications or pop-ups, Supercharger-by-id navigation or multi-stop routes, auto steering wheel heat, remote start, PIN to Drive, speed limit changes, guest mode, seat cooler, schedule changes, software updates; valet or dashcam/boombox when those tools are not listed (operator opt-in). Never reach for raw endpoints, scripts or another agent instead.
 
 ## Never
 

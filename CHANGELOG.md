@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1 (unreleased)
+
+Review follow-ups from 0.6.0 and a navigation check. No new commands; tool counts unchanged.
+
+- Navigation research: `navigation_sc_request` (Supercharger by id) and `navigation_waypoints_request` (multi-stop) are **not added**. Tesla's Fleet API docs list them without request parameters, the stock `tesla-http-proxy` has no handler for either (`invalid_command`, like `navigation_gps_request`), and Tesla's published protos have no action for them; the only signed encodings are unverified third-party reverse engineering. Reasons recorded in BACKLOG, README and skills. `share_navigation` stays one destination per send.
+- Valet PIN redaction: only a well-formed 4-digit `TESLA_FLEET_VALET_PIN` is registered as a short secret. A malformed value (never sent anyway) no longer masks unrelated numbers in other tools' replies.
+- Valet arguments: `code`, `secret`, `valet_code`, `valet_secret` and `valet_passcode` (any case or separator, e.g. `Valet-Code`, `valetCode`) are now refused like `pin`/`password`, not ignored.
+- Docs: a valid PIN such as `2000` also masks ordinary numbers equal to it (for example `remote_boombox` sound id 2000) in command results and errors.
+- Location filtering for undocumented records (`get_wall_connector_charge_history` sessions): keys are split on separators and camelCase, so `coords`, `homeLatitude`, `homeLongitude`, `HomeLat`, `gpsLng`, `geoLocation` and similar are dropped at every depth, alongside the snake_case names already covered.
+
 ## 0.6.0 (unreleased)
 
 More commands and reads. Every new command is hidden unless `TESLA_FLEET_READ_ONLY` is explicitly off (fails closed), previews without `confirm`, needs `user_request` with `confirm=true`, honours `TESLA_FLEET_DRY_RUN`, never wakes the car and is never retried. Request bodies follow the parameter names and enums the stock `tesla-http-proxy` reads (`pkg/proxy/command.go`); new read field names follow Tesla's Fleet Telemetry field list (`vehicle_data` equivalents).

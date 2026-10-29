@@ -134,7 +134,23 @@ export function buildHistoryQuery(args: ToolArgs, now: Date = new Date()): Histo
 const SERIES_CAP = 400;
 const SESSIONS_CAP = 100;
 
-const LOCATION_KEY = /(^|_)(lat|lon|lng|latitude|longitude|location|gps|coordinates?|address)($|_)/i;
+const LOCATION_WORDS = new Set([
+  "lat", "lon", "lng", "latitude", "longitude", "location", "gps", "geo", "geolocation",
+  "coord", "coords", "coordinate", "coordinates", "address",
+]);
+/**
+ * True when any word of the key is a location word. Words split on separators and camelCase
+ * boundaries: home_latitude, homeLatitude, HomeLat, GPS-Coords, coords all match.
+ */
+export function isLocationKey(key: string): boolean {
+  const words = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  return words.some((w) => LOCATION_WORDS.has(w));
+}
 /** Drop location-looking keys from an undocumented record, at every depth (objects and arrays). */
 export function dropLocation(e: Record<string, unknown>): Record<string, unknown> {
   return dropLocationDeep(e, 0) as Record<string, unknown>;
@@ -144,7 +160,7 @@ function dropLocationDeep(v: unknown, depth: number): unknown {
   if (Array.isArray(v)) return v.map((x) => dropLocationDeep(x, depth + 1));
   if (v && typeof v === "object") {
     return Object.fromEntries(Object.entries(v as Record<string, unknown>)
-      .filter(([k]) => !LOCATION_KEY.test(k))
+      .filter(([k]) => !isLocationKey(k))
       .map(([k, x]) => [k, dropLocationDeep(x, depth + 1)]));
   }
   return v;
