@@ -51,7 +51,7 @@ If `describe_boundary` shows `dryRunMode: true`, confirmed calls return `wouldSe
 
 ## Experimental, opt-in: dashcam clip and boombox
 
-Only listed when `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` is on. Same signed path, key, audit log and flow as above. `dashcam_save_clip` saves the last minutes of dashcam footage (a USB drive must be in the car). `remote_boombox` plays `fart` or `locate_ping` from the external speaker. `locate_ping` only works in robotaxi mode under 10 mph (cars refuse it otherwise); `fart` is not field-tested yet. Only when the user clearly asks for that sound now.
+Only listed when `TESLA_FLEET_ENABLE_EXPERIMENTAL_COMMANDS` is on. Same signed path, key, audit log and flow as above. `dashcam_save_clip` saves the last minutes of dashcam footage (a USB drive must be in the car). `remote_boombox` plays `fart` or `locate_ping` from the external speaker. `locate_ping` only works in robotaxi mode under 10 mph (`locate_ping_robotaxi_only`: say so and ask before trying `fart`; never retry the ping). `fart` is reported to work elsewhere but is not field-tested here. Only when the user clearly asks for that sound now.
 
 ## Never
 

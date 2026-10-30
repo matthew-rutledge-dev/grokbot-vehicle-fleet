@@ -471,6 +471,24 @@ test("remote_boombox + dashcam_save_clip: signed send carries exactly the expect
   }
 });
 
+test("remote_boombox: the car's robotaxi-only locate ping refusal = locate_ping_robotaxi_only with a fart hint; not retried (0.7.1)", async () => {
+  for (const [reason, code] of [
+    ["RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph", "locate_ping_robotaxi_only"],
+    ["not_supported", "vehicle_rejected"],
+  ] as const) {
+    const v = new FakeVehicle({ vin: VIN, answer: "error", reason });
+    const { ctx } = setup(expEnv(), signedRoute(v));
+    const b = body(await (await connect(ctx)).callTool({ name: "remote_boombox", arguments: { sound: "locate_ping", ...intent } }));
+    assert.equal(b.ok, false);
+    assert.equal(b.sent, true);
+    assert.equal(b.code, code);
+    assert.equal(b.reason, reason);
+    if (code === "locate_ping_robotaxi_only") assert.match(String(b.hint), /fart/);
+    else assert.equal(b.hint, undefined);
+    assert.equal(v.received.filter((r) => r.kind === "command").length, 1, "no retry");
+  }
+});
+
 test("encodeBoomboxAction: Action.vehicleAction(2) > boomboxAction(64, tag 0x82 0x04) > sound(1) varint; sound 0 = empty inner message", () => {
   assert.equal(encodeBoomboxAction(2000).toString("hex"), "120682040308d00f");
   assert.equal(encodeBoomboxAction(0).toString("hex"), "1203820400");

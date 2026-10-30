@@ -32,6 +32,8 @@ type Extra = {
   build: (args: ToolArgs) => { action: Buffer; info?: Record<string, unknown> };
   /** Noun for messages ("dashcam save", "boombox sound"). */
   noun: string;
+  /** Optional clearer code/hint for a known vehicle rejection reason. */
+  explainRejection?: (reason: string) => { code: string; hint: string } | undefined;
 };
 
 async function audit(ctx: ToolContext, x: Extra, e: { event: AuditEvent; [k: string]: unknown }): Promise<boolean> {
@@ -137,7 +139,8 @@ async function runExtra(x: Extra, args: ToolArgs, ctx: ToolContext): Promise<Rec
     }
     if (r.status === "rejected") {
       await audit(ctx, x, { ...base, event: "result", outcome: "rejected", reason: r.reason ?? null, authenticatedResponse: r.authenticatedResponse });
-      return { ok: false, sent: true, ...head, code: "vehicle_rejected", reason: r.reason ?? "no reason given", message: `Vehicle rejected the ${x.noun}: ${r.reason ?? "no reason given"}.` };
+      const known = r.reason ? x.explainRejection?.(r.reason) : undefined;
+      return { ok: false, sent: true, ...head, code: known?.code ?? "vehicle_rejected", reason: r.reason ?? "no reason given", message: `Vehicle rejected the ${x.noun}: ${r.reason ?? "no reason given"}.`, ...(known ? { hint: known.hint } : {}) };
     }
     await audit(ctx, x, { ...base, event: "result", outcome: "fault", fault: r.fault });
     return {
@@ -202,6 +205,10 @@ const BOOMBOX: Extra = {
     const id = BOOMBOX_SOUNDS[a.sound as string];
     return { action: encodeBoomboxAction(id), info: { sound: a.sound, soundId: id } };
   },
+  // The car's own check (seen in a field test here, and reported in teslamotors/vehicle-command#266).
+  explainRejection: (reason) => /locate ping only allowed in robotaxi mode/i.test(reason)
+    ? { code: "locate_ping_robotaxi_only", hint: "The car only plays locate_ping in robotaxi mode under 10 mph. Ask before trying sound fart instead; do not retry locate_ping." }
+    : undefined,
 };
 
 function extraTool(x: Extra, title: string, description: string, props: Record<string, unknown> = {}, required?: string[]): ToolDef {
@@ -222,6 +229,6 @@ export const EXPERIMENTAL_SIGNED_TOOLS: ToolDef[] = [
   extraTool(DASHCAM, "Save dashcam clip (experimental)",
     "Save the last few minutes of dashcam footage on the car's USB drive (VehicleAction 47). Field-tested once on one car (a manual-save entry appeared)."),
   extraTool(BOOMBOX, "Play boombox sound (experimental)",
-    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. locate_ping only works in robotaxi mode under 10 mph (the car refused it otherwise in a field test: 'RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph'); on a normal car use fart. Noisy and public: only when the person asks. fart not field-tested yet.",
+    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. locate_ping only works in robotaxi mode under 10 mph: the car refuses it otherwise (code locate_ping_robotaxi_only, reason 'RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph'; seen in a field test here and reported by others), so on an owner's car use fart. fart (id 0, an empty BoomboxAction) is reported to work on signed-command cars by two independent implementations with the same encoding, but is not field-tested here. No unsigned REST fallback: Fleet API answers remote_boombox with 403 on cars that require signed commands, and the stock proxy has no handler. Noisy and public: only when the person asks.",
     { sound: { type: "string", enum: Object.keys(BOOMBOX_SOUNDS) } }, ["sound"]),
 ];
