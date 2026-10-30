@@ -72,13 +72,13 @@ export function mapFleetError(
       `This plugin sends REST-only commands straight to the Fleet API. Some proxy builds also forward the request after this error${b.trailingData ? " (this reply had forwarded data appended)" : ""}, so it may have reached the car: check before resending.`);
   }
   if (status < 500 && /\b(invalid[ _]command|command not implemented|unknown command)\b/.test(text)) {
-    return mk("invalid_command", "The command proxy does not support this command (no handler); nothing was executed by the proxy.",
-      "Update tesla-http-proxy, or use a command this plugin documents as supported.");
+    return mk("invalid_command", "The endpoint that received this command (the Fleet API, or your command proxy for signed commands) does not support it; nothing was executed.",
+      "Use a command this plugin documents as supported. If it went through tesla-http-proxy, a newer proxy may add a handler.");
   }
   // Tesla energy backend rejections arrive as `<internal url> => {Message: "...", Status: 400}`.
   const inner = /Message:\s*"([^"]{1,300})"/.exec(`${err} ${desc}`);
   if (status === 400 && inner) {
-    return mk("invalid_value", `Tesla rejected the request: ${inner[1]}`,
+    return mk("invalid_value", `Tesla rejected the request: ${noUrls(inner[1])}`,
       "Nothing changed. Read the current value back and pick an allowed value; it was not retried.");
   }
 
@@ -104,7 +104,7 @@ export function mapFleetError(
       return mk("forbidden", "Forbidden: the Fleet API refused this request for this account or resource.",
         "Check that the account owns or shares this vehicle or site; if it persists, see skill vehicle-fleet-troubleshoot.");
     case 404:
-      return mk("not_found", desc || err || "Resource not found (or no cached data for this vehicle).");
+      return mk("not_found", noUrls(desc || err) || "Resource not found (or no cached data for this vehicle).");
     case 408:
       return mk("vehicle_unavailable", "Vehicle is asleep, offline, or has poor connectivity (this request was still billed).",
         "Do not retry in a loop. Ask the user before calling wake_vehicle, or try again later.");
@@ -112,7 +112,7 @@ export function mapFleetError(
       if (text.includes("regist"))
         return mk("partner_not_registered", "The developer app is not registered in this region.",
           "Call the partner register endpoint for this region (skill vehicle-fleet-setup).");
-      return mk("precondition_failed", desc || err || "Precondition failed (e.g. cached data not supported for this vehicle).");
+      return mk("precondition_failed", noUrls(desc || err) || "Precondition failed (e.g. cached data not supported for this vehicle).");
     case 421:
       return mk("wrong_region", "This account is not in the configured Fleet API region.",
         "Unset TESLA_FLEET_BASE_URL/TESLA_FLEET_REGION to auto-detect, or set the right region.");
@@ -120,7 +120,7 @@ export function mapFleetError(
       if (text.includes("not_paired") || text.includes("unsigned") || text.includes("key"))
         return mk("virtual_key_missing", "The app's virtual key is not paired with this vehicle.",
           "Pair the key with https://www.tesla.com/_ak/<your-domain> in the Tesla app.");
-      return mk("invalid_resource", desc || err || "Invalid request data.");
+      return mk("invalid_resource", noUrls(desc || err) || "Invalid request data.");
     case 423:
       return mk("account_locked", "The account is locked and must be unlocked by Tesla.");
     case 429:

@@ -16,7 +16,7 @@ Router for in-car requests. Apply `vehicle-fleet-boundary` first; run every comm
 - Windows: `window_control` (`vent` only in Park, or `close`; explicit vin). Never automate it.
 - Media: `media_toggle_playback`, `media_next_track` / `media_prev_track`, `media_next_fav` / `media_prev_fav`, `media_volume_up` / `media_volume_down`, `adjust_volume` (0-10); `get_media_state` to see what is playing.
 - Valet (only if listed): `set_valet_mode` (explicit vin), `reset_valet_pin`. The PIN is on the server; never ask for or say it.
-- Experimental (only if listed): `dashcam_save_clip`, `remote_boombox` (`fart` / `locate_ping`).
+- Experimental (only if listed): `dashcam_save_clip`, `remote_boombox` (`fart` works; `locate_ping` is robotaxi-only and owner cars refuse it).
 - Security: `door_lock`, `door_unlock` (explicit vin), `actuate_trunk` (explicit vin; frunk usually cannot close remotely), `set_sentry_mode`, `flash_lights`, `honk_horn`.
 - Charging: `charge_start` / `charge_stop`, `set_charge_limit`, `set_charging_amps`, `charge_port_door_open` / `_close`.
 - Powerwall: read `get_energy_site_info`, then `set_backup_reserve`, `set_operation_mode`, `set_storm_mode`, `set_grid_import_export`, `set_off_grid_vehicle_charging_reserve`.

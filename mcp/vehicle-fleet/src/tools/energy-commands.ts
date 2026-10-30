@@ -29,8 +29,13 @@ type EnergySpec = {
    * result, nothing sent) or `note` (merged into the send result).
    */
   precheck?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext) => Promise<{ skip?: Record<string, unknown>; note?: Record<string, unknown> }>;
-  /** Extra billable reads made by `precheck`, shown in previews. */
+  /** Extra billable reads made by `precheck` and `readBack`, shown in previews. */
   extraReads?: string;
+  /**
+   * Optional post-send read-back, run only after Tesla accepted a confirmed live send. Never
+   * resends; its fields are merged into the success result.
+   */
+  readBack?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown) => Promise<Record<string, unknown>>;
 };
 
 export const OFF_GRID_RESERVE_FIELD = "off_grid_vehicle_charging_reserve_percent";
@@ -75,6 +80,54 @@ async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ct
   return { note: { precheck: "ok", previous: current } };
 }
 
+/** Off-grid reserve read-back: up to this many fresh site_info reads, this far apart (~15 s in all). */
+export const OFF_GRID_READBACK_TRIES = 3;
+export const OFF_GRID_READBACK_DELAY_MS = 5_000;
+
+/**
+ * After Tesla accepts an off-grid reserve change, the site can keep reporting the old value for a
+ * while (seen in a field test: accepted, immediate read-back still old). Re-read a few times and
+ * report honestly, never resending:
+ * - "confirmed": the site reports the requested value.
+ * - "pending": still the previous value (or no value) after the last read; accepted, not yet visible.
+ * - "mismatch": a value that is neither the requested nor the previous one (only when the
+ *   pre-read gave a previous value; without one, a different value stays "pending").
+ * - "unavailable": every read-back failed.
+ */
+async function offGridReadBack(siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown): Promise<Record<string, unknown>> {
+  const want = body[OFF_GRID_RESERVE_FIELD];
+  let last: unknown;
+  let reads = 0;
+  let failed = 0;
+  for (let i = 0; i < OFF_GRID_READBACK_TRIES; i++) {
+    await ctx.fleet.pause(OFF_GRID_READBACK_DELAY_MS);
+    reads++;
+    let v: unknown;
+    try {
+      v = (await ctx.fleet.energySiteInfo(siteId, true)).data[OFF_GRID_RESERVE_FIELD];
+    } catch {
+      failed++;
+      continue;
+    }
+    last = v;
+    if (v === want) return { readBack: "confirmed", readBackValue: v, readBackReads: reads };
+    if (typeof v === "number" && typeof previous === "number" && v !== previous) {
+      return {
+        readBack: "mismatch", readBackValue: v, readBackReads: reads,
+        readBackMessage: `Tesla accepted the change, but the site now reports ${v}, not the requested ${String(want)}. Tell the user; do not resend without asking.`,
+      };
+    }
+  }
+  const waited = Math.round((OFF_GRID_READBACK_TRIES * OFF_GRID_READBACK_DELAY_MS) / 1000);
+  if (failed === reads) {
+    return { readBack: "unavailable", readBackReads: reads, readBackMessage: "Tesla accepted the change, but the read-back failed; check later with get_energy_site_info." };
+  }
+  return {
+    readBack: "pending", readBackValue: last ?? null, readBackReads: reads,
+    readBackMessage: `Tesla accepted the change, but after about ${waited} s the site still reports ${last === undefined ? "no value" : String(last)}. Settings can take a while to show; check again later with get_energy_site_info. Not resent.`,
+  };
+}
+
 const SPECS: EnergySpec[] = [
   {
     name: "set_backup_reserve", path: "backup",
@@ -85,12 +138,13 @@ const SPECS: EnergySpec[] = [
   },
   {
     name: "set_off_grid_vehicle_charging_reserve", path: "off_grid_vehicle_charging_reserve",
-    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop).",
+    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop). After Tesla accepts, re-reads site_info up to 3 times over about 15 s and reports readBack: confirmed, pending (accepted but the site still shows the old value; the Powerwall can report it late), mismatch, or unavailable. Never resends.",
     properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: OFF_GRID_RESERVE_MIN, maximum: OFF_GRID_RESERVE_MAX } },
     required: [OFF_GRID_RESERVE_FIELD],
     build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, OFF_GRID_RESERVE_MIN, OFF_GRID_RESERVE_MAX) }),
     precheck: offGridPrecheck,
-    extraReads: "1 site_info read",
+    readBack: offGridReadBack,
+    extraReads: `1 site_info read before + up to ${OFF_GRID_READBACK_TRIES} after (about ${(OFF_GRID_READBACK_TRIES * OFF_GRID_READBACK_DELAY_MS) / 1000} s read-back)`,
   },
   {
     name: "set_operation_mode", path: "operation",
@@ -230,7 +284,10 @@ function energyTool(spec: EnergySpec): ToolDef {
         const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
         const outcome = interpretEnergyResponse(raw);
         const rawShape = rawShapeOf(raw);
-        if (outcome.ok) return { ok: true, sent: true, command: spec.name, ...note, result: outcome.result, rawShape, readBackWith: "get_energy_site_info" };
+        if (outcome.ok) {
+          const rb = spec.readBack ? await spec.readBack(siteId, body, ctx, note.previous) : {};
+          return { ok: true, sent: true, command: spec.name, ...note, result: outcome.result, rawShape, ...rb, readBackWith: "get_energy_site_info" };
+        }
         return { ok: false, command: spec.name, ...note, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
       } catch (e) {
         if (e instanceof FleetApiError && e.info.status === 403) {

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.7.2
+
+Field-test follow-ups and review fixes from 0.7.1. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- `set_off_grid_vehicle_charging_reserve` read-back: in a field test the Powerwall accepted an in-range change, but a read made right after still showed the old value (the restore read back fine). After Tesla accepts, the tool now re-reads `site_info` up to 3 times about 5 s apart (roughly 15 s, at most 3 extra billed reads, stopping early) and adds `readBack`: `confirmed` (the site reports the requested value), `pending` (accepted, but the site still reports the previous value, or no value, after the last read: reported as accepted-not-yet-visible, not as a failure), `mismatch` (a third value; only when the pre-read gave `previous`) or `unavailable` (every read-back failed), plus `readBackValue`, `readBackReads` and a `readBackMessage` when not confirmed. Nothing is ever resent. No read-back after a rejection, a `noop`, a preview or `TESLA_FLEET_DRY_RUN`. The preview's `estimatedBillableCalls` lists the extra reads.
+- Errors: URLs are now stripped from Tesla's nested energy message (`invalid_value`) and from the 404 / 412 / 422 fallback messages (`not_found`, `precondition_failed`, `invalid_resource`), not only from unknown 4xx text.
+- `invalid_command` no longer says "the command proxy" (the same reply text can come from the Fleet API REST endpoint); the message names both possible sources.
+- Vehicle commands (REST-only `navigation_request` and proxied ones) clear cached vehicle data in a `finally`, so a failed or timed-out send that may still have reached the car never leaves the pre-send data cached.
+- Tests: `share_navigation` with no proxy configured is still refused when the virtual key is unpaired (`virtual_key_missing`) or the car is asleep or offline (`vehicle_not_online`, no wake), with nothing sent.
+- `remote_boombox` docs (tool description, skills, README, docs): `fart` is field-tested (accepted and heard outside the car). Owner cars refuse `locate_ping` with "locate ping only allowed in robotaxi mode under 10 mph" even with the owner outside the parked car and the phone key inside. The refusal is matched as a case-insensitive phrase anywhere in the car's reason, not an exact string; a test covers different surrounding wording.
+- BACKLOG: 0.7.1 field-test results recorded (navigation by address shown on screen, boombox `fart`, valet on/off, HomeLink and media confirmed, off-grid reserve change and restore accepted with read-back lag).
+
 ## 0.7.1
 
 Field-test fixes. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).

@@ -426,10 +426,13 @@ export class FleetClient {
     if (REST_ONLY_COMMANDS.has(name)) {
       this.limiter.take("command", vin);
       const base = await this.resolveBaseUrl();
-      const res = await this.call("command", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`, body, undefined, 30_000);
-      this.cache.deletePrefix(`live:${vin}`);
-      this.cache.deletePrefix(`cached:${vin}`);
-      return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
+      try {
+        const res = await this.call("command", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`, body, undefined, 30_000);
+        return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
+      } finally {
+        // Also on errors: a timeout or garbled reply may still have reached the car.
+        this.invalidateVehicle(vin);
+      }
     }
     if (!this.config.proxyUrl) {
       throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
@@ -437,10 +440,23 @@ export class FleetClient {
     }
     this.limiter.take("command", vin);
     const url = `${this.config.proxyUrl}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`;
-    const res = await this.call("command", "POST", url, body, this.proxy(), 30_000);
+    try {
+      const res = await this.call("command", "POST", url, body, this.proxy(), 30_000);
+      return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
+    } finally {
+      this.invalidateVehicle(vin);
+    }
+  }
+
+  /** Drop cached live and cached vehicle data after any command attempt. */
+  private invalidateVehicle(vin: string): void {
     this.cache.deletePrefix(`live:${vin}`);
     this.cache.deletePrefix(`cached:${vin}`);
-    return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
+  }
+
+  /** Bounded wait used by post-send read-backs (injectable sleep, so tests do not wait). */
+  pause(ms: number): Promise<void> {
+    return this.sleep(ms);
   }
 
   /**

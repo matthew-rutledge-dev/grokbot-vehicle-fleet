@@ -21,7 +21,8 @@ const infoReads = (calls: Call[]) => calls.filter((x) => x.url.endsWith("/site_i
 
 test("off-grid reserve: confirmed send reads site_info fresh, then posts the exact body direct to the Fleet API", async () => {
   const { ctx, calls } = setup(baseEnv(ON), {
-    [INFO]: info({ [FIELD]: 10, components: { off_grid_vehicle_charging_reserve_supported: true } }),
+    // Pre-read 10, then the site reports the new 25 (0.7.2 read-back confirms on its first read).
+    [INFO]: (_c, n) => ({ status: 200, body: { response: { [FIELD]: n === 1 ? 10 : 25, components: { off_grid_vehicle_charging_reserve_supported: true } } } }),
     [POST]: updated,
   });
   const c = await connect(ctx);
@@ -35,10 +36,11 @@ test("off-grid reserve: confirmed send reads site_info fresh, then posts the exa
   assert.equal(p[0].url, `${BASE}/api/1/energy_sites/${SITE}/off_grid_vehicle_charging_reserve`);
   assert.deepEqual(JSON.parse(p[0].body ?? "{}"), { [FIELD]: 25 });
   assert.equal(p[0].dispatcher, undefined, "not via the vehicle proxy");
-  assert.equal(infoReads(calls).length, 1);
+  assert.equal(b.readBack, "confirmed");
+  assert.equal(infoReads(calls).length, 2, "1 pre-read + 1 read-back");
   // The pre-read bypasses the 10-minute site_info cache: a second confirmed send reads again.
   await c.callTool({ name: TOOL, arguments: { [FIELD]: 30, ...intent } });
-  assert.equal(infoReads(calls).length, 2);
+  assert.equal(infoReads(calls).length, 6, "1 pre-read + 3 read-backs (site still shows 25)");
 });
 
 test("off-grid reserve: already set = no-op, nothing posted", async () => {
