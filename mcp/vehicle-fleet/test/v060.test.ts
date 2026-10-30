@@ -474,6 +474,8 @@ test("remote_boombox + dashcam_save_clip: signed send carries exactly the expect
 test("remote_boombox: the car's robotaxi-only locate ping refusal = locate_ping_robotaxi_only with a fart hint; not retried (0.7.1)", async () => {
   for (const [reason, code] of [
     ["RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph", "locate_ping_robotaxi_only"],
+    // Phrase match (0.7.2 docs): other wording around the phrase, any case, still maps.
+    ["vehicle error: LOCATE PING ONLY ALLOWED IN ROBOTAXI MODE (speed check)", "locate_ping_robotaxi_only"],
     ["not_supported", "vehicle_rejected"],
   ] as const) {
     const v = new FakeVehicle({ vin: VIN, answer: "error", reason });

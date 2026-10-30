@@ -205,7 +205,8 @@ const BOOMBOX: Extra = {
     const id = BOOMBOX_SOUNDS[a.sound as string];
     return { action: encodeBoomboxAction(id), info: { sound: a.sound, soundId: id } };
   },
-  // The car's own check (seen in a field test here, and reported in teslamotors/vehicle-command#266).
+  // The car's own check (seen in field tests here, and reported in teslamotors/vehicle-command#266).
+  // Phrase match, not an exact match: any reason containing this phrase (case-insensitive) maps.
   explainRejection: (reason) => /locate ping only allowed in robotaxi mode/i.test(reason)
     ? { code: "locate_ping_robotaxi_only", hint: "The car only plays locate_ping in robotaxi mode under 10 mph. Ask before trying sound fart instead; do not retry locate_ping." }
     : undefined,
@@ -229,6 +230,6 @@ export const EXPERIMENTAL_SIGNED_TOOLS: ToolDef[] = [
   extraTool(DASHCAM, "Save dashcam clip (experimental)",
     "Save the last few minutes of dashcam footage on the car's USB drive (VehicleAction 47). Field-tested once on one car (a manual-save entry appeared)."),
   extraTool(BOOMBOX, "Play boombox sound (experimental)",
-    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. locate_ping only works in robotaxi mode under 10 mph: the car refuses it otherwise (code locate_ping_robotaxi_only, reason 'RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph'; seen in a field test here and reported by others), so on an owner's car use fart. fart (id 0, an empty BoomboxAction) is reported to work on signed-command cars by two independent implementations with the same encoding, but is not field-tested here. No unsigned REST fallback: Fleet API answers remote_boombox with 403 on cars that require signed commands, and the stock proxy has no handler. Noisy and public: only when the person asks.",
+    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. locate_ping only works in robotaxi mode under 10 mph: owner cars refuse it (code locate_ping_robotaxi_only, reason 'RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph'), including with the owner outside the parked car and the phone key inside (field-tested here; also reported by others), so on an owner's car use fart. fart (id 0, an empty BoomboxAction) is field-tested here: accepted and heard from outside the car. The refusal is recognised by a case-insensitive phrase match on 'locate ping only allowed in robotaxi mode' anywhere in the car's reason text, so small wording changes around it still map. No unsigned REST fallback: Fleet API answers remote_boombox with 403 on cars that require signed commands, and the stock proxy has no handler. Noisy and public: only when the person asks.",
     { sound: { type: "string", enum: Object.keys(BOOMBOX_SOUNDS) } }, ["sound"]),
 ];
