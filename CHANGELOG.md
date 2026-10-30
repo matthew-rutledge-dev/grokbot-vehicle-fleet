@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.7.1
+
+Field-test fixes. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- `share_navigation` (address or `lat`/`lon`) now posts `navigation_request` straight to the Fleet API REST endpoint (unsigned, no proxy dispatcher, no proxy needed). `tesla-http-proxy` marks it REST-only (`pkg/proxy/command.go` returns `ErrCommandUseRESTAPI`, "command requires using the REST API", for the sharing endpoints); in a field test a proxy build answered with that error and also forwarded the request, so the reply was the error JSON followed by the forwarded gzip bytes. `REST_ONLY_COMMANDS` lists only `navigation_request` (the proxy's other REST-only commands, managed charging, are not tools here). Previews and dry-runs show `<fleet base>` and a `transport` note. Every other vehicle command still goes through the proxy.
+- Error bodies that are not plain JSON: a leading JSON object is used and appended data is dropped (`trailingData: true`); otherwise only printable text is kept. No raw binary reaches a tool result. New codes: `rest_required` (the proxy's "command requires using the REST API"; the hint says the request may still have reached the car, so check before resending) and `invalid_command` (proxy "invalid command" / "command not implemented" / "unknown command").
+- Tesla energy rejections shaped `<internal url> => {Message: "...", Status: 400}` now come back as `invalid_value` with Tesla's message and no internal URL. Unknown 4xx error text no longer becomes the error code and has URLs removed.
+- `set_off_grid_vehicle_charging_reserve` accepts a whole percent 10-95 and refuses anything else before any network call. Source: Tesla's Powerwall 3 Device Setup Guide (Frequency-Based Load Shed, "the same setting" as the app's vehicle-charging threshold, "between 10% and 95%"); a field test send of 96 was rejected with HTTP 400 "Invalid off grid vehicle charging reserve values". Tesla documents no step size.
+- `remote_boombox` description: `locate_ping` only works in robotaxi mode under 10 mph (the car refused it otherwise in a field test); `fart` is not field-tested yet.
+- BACKLOG: 0.6.x field-test results recorded (COP level mapping, climate keeper, auto seat climate, window vent/close, volume verified by read-back; HomeLink and media skip/toggle sent, visual result pending; valet still to test).
+
 ## 0.7.0
 
 One new energy command, a skipped vehicle command with the reasons, and review follow-ups from 0.6.2.

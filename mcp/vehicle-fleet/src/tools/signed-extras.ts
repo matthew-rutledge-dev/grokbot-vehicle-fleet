@@ -222,6 +222,6 @@ export const EXPERIMENTAL_SIGNED_TOOLS: ToolDef[] = [
   extraTool(DASHCAM, "Save dashcam clip (experimental)",
     "Save the last few minutes of dashcam footage on the car's USB drive (VehicleAction 47). Field-tested once on one car (a manual-save entry appeared)."),
   extraTool(BOOMBOX, "Play boombox sound (experimental)",
-    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. Noisy and public: only when the person asks. Not field-tested.",
+    "Play a sound through the car's external speaker (VehicleAction 64): fart (sound id 0) or locate_ping (sound id 2000), the two ids in Tesla's Fleet API docs. locate_ping only works in robotaxi mode under 10 mph (the car refused it otherwise in a field test: 'RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph'); on a normal car use fart. Noisy and public: only when the person asks. fart not field-tested yet.",
     { sound: { type: "string", enum: Object.keys(BOOMBOX_SOUNDS) } }, ["sound"]),
 ];

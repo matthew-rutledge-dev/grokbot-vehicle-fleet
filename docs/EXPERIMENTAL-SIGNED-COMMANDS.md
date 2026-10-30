@@ -21,7 +21,7 @@ Off by default. Listed only when `TESLA_FLEET_READ_ONLY` is off **and** `TESLA_F
 | Tool | Action | Body | Status |
 |---|---|---|---|
 | `dashcam_save_clip` | `VehicleAction.dashcamSaveClipAction` (field **47**, empty) | none | Field-tested once (accepted; clip saved). Needs a USB drive in the car. Stock proxy: `400 invalid_command`. |
-| `remote_boombox` | `VehicleAction.boomboxAction` (field **64**, `BoomboxAction { uint32 sound = 1; }`) | `sound`: `fart` = 0, `locate_ping` = 2000 only | **Not field-tested.** The two ids are the ones Tesla's Fleet API docs give for `remote_boombox`. Stock proxy: "command not implemented". Field 64 is community-documented (`Teslemetry/tesla-protocol`, marked as an extension), not in Tesla's published protos. |
+| `remote_boombox` | `VehicleAction.boomboxAction` (field **64**, `BoomboxAction { uint32 sound = 1; }`) | `sound`: `fart` = 0, `locate_ping` = 2000 only | `locate_ping` field-tested: refused outside robotaxi mode ("RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph"). `fart` not field-tested. The two ids are the ones Tesla's Fleet API docs give for `remote_boombox`. Stock proxy: "command not implemented". Field 64 is community-documented (`Teslemetry/tesla-protocol`, marked as an extension), not in Tesla's published protos. |
 
 Both are labelled "(experimental)" in their titles and their descriptions start with "EXPERIMENTAL, OPT-IN". `play_video_on_screen` keeps its own code path unchanged.
 

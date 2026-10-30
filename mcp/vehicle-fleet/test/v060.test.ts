@@ -103,8 +103,8 @@ test("0.6.0 commands: confirm without user_request is refused, nothing sent", as
 
 // ---------- navigation by coordinates ----------
 
-test("share_navigation lat/lon: navigation_request (proxy forwards it), text lat,lon, no order, coordinates never echoed", async () => {
-  const { ctx, calls } = setup(baseEnv(ON), cmd("navigation_request"));
+test("share_navigation lat/lon: navigation_request (REST-only, straight to the Fleet API), text lat,lon, no order, coordinates never echoed", async () => {
+  const { ctx, calls } = setup(baseEnv(ON), { [`POST ${BASE}/api/1/vehicles/${VIN}/command/navigation_request`]: ok });
   const c = await connect(ctx);
   const pre = body(await c.callTool({ name: "share_navigation", arguments: { lat: 12.3456789, lon: -45.6789012 } }));
   assert.equal(pre.endpoint, "POST /api/1/vehicles/{vin}/command/navigation_request");

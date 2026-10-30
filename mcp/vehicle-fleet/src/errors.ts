@@ -42,6 +42,11 @@ function parseRetryAfter(headers: Headers | undefined): number | undefined {
   return undefined;
 }
 
+/** Drop URLs from upstream error text (internal Tesla hosts, the proxy address). */
+function noUrls(s: string): string {
+  return s.replace(/https?:\/\/\S+/g, "[url]").slice(0, 300);
+}
+
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
@@ -59,6 +64,23 @@ export function mapFleetError(
   const base = { status, billed };
   const mk = (code: string, message: string, hint?: string, extra: Partial<FleetErrorInfo> = {}) =>
     new FleetApiError({ ...base, code, message, hint, ...extra });
+
+  // Command-proxy answers (tesla-http-proxy pkg/proxy/command.go), any status below 500.
+  if (status < 500 && text.includes("command requires using the rest api")) {
+    return mk("rest_required",
+      "The command proxy says this command must use the Fleet API REST endpoint, not the proxy.",
+      `This plugin sends REST-only commands straight to the Fleet API. Some proxy builds also forward the request after this error${b.trailingData ? " (this reply had forwarded data appended)" : ""}, so it may have reached the car: check before resending.`);
+  }
+  if (status < 500 && /\b(invalid[ _]command|command not implemented|unknown command)\b/.test(text)) {
+    return mk("invalid_command", "The command proxy does not support this command (no handler); nothing was executed by the proxy.",
+      "Update tesla-http-proxy, or use a command this plugin documents as supported.");
+  }
+  // Tesla energy backend rejections arrive as `<internal url> => {Message: "...", Status: 400}`.
+  const inner = /Message:\s*"([^"]{1,300})"/.exec(`${err} ${desc}`);
+  if (status === 400 && inner) {
+    return mk("invalid_value", `Tesla rejected the request: ${inner[1]}`,
+      "Nothing changed. Read the current value back and pick an allowed value; it was not retried.");
+  }
 
   switch (status) {
     case 401:
@@ -111,7 +133,7 @@ export function mapFleetError(
     default:
       if (status >= 500)
         return mk("server_error", `Fleet API server error (${status}); not billed.`, "Try again later.");
-      return mk(err || "http_error", desc || err || `HTTP ${status}`);
+      return mk(/^[a-z0-9_]{1,64}$/i.test(err) ? err : "http_error", noUrls(desc || err) || `HTTP ${status}`);
   }
 }
 

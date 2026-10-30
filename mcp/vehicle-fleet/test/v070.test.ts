@@ -89,10 +89,10 @@ test("off-grid reserve: value absent or pre-read failing = sent once, precheck u
   }
 });
 
-test("off-grid reserve: strict integer 0-100; bad values refused before any network call", async () => {
+test("off-grid reserve: strict integer 10-95 (0.7.1); bad values refused before any network call", async () => {
   const { ctx, calls } = setup(baseEnv(ON));
   const c = await connect(ctx);
-  for (const v of [-1, 101, 20.5, "20", null, true, 1e309, Number.NaN]) {
+  for (const v of [-1, 0, 9, 96, 100, 101, 20.5, "20", null, true, 1e309, Number.NaN]) {
     const res = await c.callTool({ name: TOOL, arguments: { [FIELD]: v, ...intent } });
     assert.equal(isError(res), true, String(v));
     assert.equal(body(res).code, "invalid_arguments", String(v));
@@ -102,7 +102,7 @@ test("off-grid reserve: strict integer 0-100; bad values refused before any netw
     assert.equal(body(res).code, "invalid_arguments");
   }
   assert.equal(body(await c.callTool({ name: TOOL, arguments: { [FIELD]: 20, confirm: true } })).code, "user_request_required");
-  for (const v of [0, 100]) {
+  for (const v of [10, 95]) {
     const b = body(await c.callTool({ name: TOOL, arguments: { [FIELD]: v } }));
     assert.equal(b.dryRun, true, String(v));
     assert.deepEqual(b.body, { [FIELD]: v });

@@ -34,6 +34,16 @@ type EnergySpec = {
 };
 
 export const OFF_GRID_RESERVE_FIELD = "off_grid_vehicle_charging_reserve_percent";
+/**
+ * Allowed off-grid vehicle charging reserve: 10-95 %. Tesla's Powerwall 3 Device Setup Guide
+ * (energylibrary.tesla.com, "Optional: Adjust Frequency Overrides" -> Frequency-Based Load Shed)
+ * calls it the same setting as the app's vehicle-charging-during-outage threshold and gives
+ * "between 10% and 95%". A live send of 96 was rejected with HTTP 400 "Invalid off grid vehicle
+ * charging reserve values". Tesla documents no step size; any other rejection is
+ * surfaced as invalid_value with Tesla's message.
+ */
+export const OFF_GRID_RESERVE_MIN = 10;
+export const OFF_GRID_RESERVE_MAX = 95;
 
 /**
  * set_off_grid_vehicle_charging_reserve send-time check: one fresh site_info read.
@@ -75,10 +85,10 @@ const SPECS: EnergySpec[] = [
   },
   {
     name: "set_off_grid_vehicle_charging_reserve", path: "off_grid_vehicle_charging_reserve",
-    description: "Set the Powerwall off-grid vehicle charging reserve percent (0-100): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop).",
-    properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: 0, maximum: 100 } },
+    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop).",
+    properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: OFF_GRID_RESERVE_MIN, maximum: OFF_GRID_RESERVE_MAX } },
     required: [OFF_GRID_RESERVE_FIELD],
-    build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, 0, 100) }),
+    build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, OFF_GRID_RESERVE_MIN, OFF_GRID_RESERVE_MAX) }),
     precheck: offGridPrecheck,
     extraReads: "1 site_info read",
   },
