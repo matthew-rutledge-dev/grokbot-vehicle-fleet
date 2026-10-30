@@ -103,8 +103,8 @@ test("0.6.0 commands: confirm without user_request is refused, nothing sent", as
 
 // ---------- navigation by coordinates ----------
 
-test("share_navigation lat/lon: navigation_request (proxy forwards it), text lat,lon, no order, coordinates never echoed", async () => {
-  const { ctx, calls } = setup(baseEnv(ON), cmd("navigation_request"));
+test("share_navigation lat/lon: navigation_request (REST-only, straight to the Fleet API), text lat,lon, no order, coordinates never echoed", async () => {
+  const { ctx, calls } = setup(baseEnv(ON), { [`POST ${BASE}/api/1/vehicles/${VIN}/command/navigation_request`]: ok });
   const c = await connect(ctx);
   const pre = body(await c.callTool({ name: "share_navigation", arguments: { lat: 12.3456789, lon: -45.6789012 } }));
   assert.equal(pre.endpoint, "POST /api/1/vehicles/{vin}/command/navigation_request");
@@ -468,6 +468,24 @@ test("remote_boombox + dashcam_save_clip: signed send carries exactly the expect
     const lines = fs.readFileSync(e.TESLA_FLEET_AUDIT_LOG, "utf8").trim().split("\n").map((l) => JSON.parse(l));
     assert.deepEqual(lines.map((l) => l.event), ["attempt", "result"]);
     assert.ok(lines.every((l) => l.tool === tool && l.experimental === true));
+  }
+});
+
+test("remote_boombox: the car's robotaxi-only locate ping refusal = locate_ping_robotaxi_only with a fart hint; not retried (0.7.1)", async () => {
+  for (const [reason, code] of [
+    ["RemoteBoombox locate ping only allowed in robotaxi mode under 10 mph", "locate_ping_robotaxi_only"],
+    ["not_supported", "vehicle_rejected"],
+  ] as const) {
+    const v = new FakeVehicle({ vin: VIN, answer: "error", reason });
+    const { ctx } = setup(expEnv(), signedRoute(v));
+    const b = body(await (await connect(ctx)).callTool({ name: "remote_boombox", arguments: { sound: "locate_ping", ...intent } }));
+    assert.equal(b.ok, false);
+    assert.equal(b.sent, true);
+    assert.equal(b.code, code);
+    assert.equal(b.reason, reason);
+    if (code === "locate_ping_robotaxi_only") assert.match(String(b.hint), /fart/);
+    else assert.equal(b.hint, undefined);
+    assert.equal(v.received.filter((r) => r.kind === "command").length, 1, "no retry");
   }
 });
 

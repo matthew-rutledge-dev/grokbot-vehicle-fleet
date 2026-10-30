@@ -93,12 +93,37 @@ export class Http {
         parsed = JSON.parse(text);
       } catch {
         // Plain-text success bodies (e.g. GET /status -> "ok") stay text; errors get a structured shape.
-        parsed = res.status < 400 ? text.slice(0, 200) : { error: "non_json_response", error_description: text.slice(0, 200) };
+        parsed = res.status < 400 ? text.slice(0, 200) : errorBodyFromText(text);
       }
     }
     if (res.status >= 400) throw mapFleetError(res.status, parsed, res.headers);
     return { status: res.status, body: parsed, headers: res.headers };
   }
+}
+
+/**
+ * Error body that is not plain JSON. Some tesla-http-proxy builds write their own JSON error and
+ * then append the forwarded upstream reply (often gzip bytes) to the same response, so the body is
+ * "JSON + binary". Use a leading JSON object when there is one; otherwise keep printable text only.
+ * Never returns raw binary.
+ */
+export function errorBodyFromText(text: string): Record<string, unknown> {
+  const t = text.trimStart();
+  if (t.startsWith("{")) {
+    const limit = Math.min(t.length, 8192);
+    for (let i = t.indexOf("}"); i !== -1 && i < limit; i = t.indexOf("}", i + 1)) {
+      try {
+        const v = JSON.parse(t.slice(0, i + 1));
+        if (v && typeof v === "object" && !Array.isArray(v)) return { ...(v as Record<string, unknown>), trailingData: t.slice(i + 1).trim() !== "" };
+      } catch { /* keep scanning */ }
+    }
+  }
+  return { error: "non_json_response", error_description: printable(text).slice(0, 200) };
+}
+
+/** Printable ASCII only (binary and control bytes dropped, whitespace collapsed). */
+export function printable(s: string): string {
+  return s.replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
 /** Unwrap the Fleet API `{ response: ... }` envelope. */

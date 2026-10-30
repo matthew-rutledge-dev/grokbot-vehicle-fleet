@@ -14,6 +14,7 @@ import { maskVin } from "../redact.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import { CONFIRM_PROPS, VIN_PROP } from "./schema.js";
 import type { ToolDef } from "./types.js";
+import { REST_ONLY_COMMANDS } from "../fleet.js";
 
 /** One POST to /api/1/vehicles/{vin}/command/{endpoint}. */
 export type Step = { endpoint: string; body: Record<string, unknown> };
@@ -301,7 +302,7 @@ const SPECS: CommandSpec[] = [
   },
   {
     name: "share_navigation", endpoint: "navigation_request", scope: "vehicle_cmds", readBack: "get_vehicle_state",
-    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon. Both go through navigation_request (the share endpoint the stock proxy forwards to the Fleet API); coordinates are shared as the text \"lat,lon\" for the car's navigation to resolve (not field-tested yet: ask the person whether the car showed the place). Pass one or the other; both is refused.",
+    description: "Send a destination to the vehicle's navigation: either an address/place text, or lat+lon. Both go through navigation_request, sent straight to the Fleet API (Tesla's tesla-http-proxy marks it REST-only); coordinates are shared as the text \"lat,lon\" for the car's navigation to resolve (not field-tested yet: ask the person whether the car showed the place). Pass one or the other; both is refused.",
     properties: {
       destination: { type: "string", description: "Address or place name." },
       lat: { type: "number", description: "Latitude (-90 to 90). Pass with lon instead of destination." },
@@ -591,7 +592,7 @@ export function previewBody(s: Step, preview?: Record<string, unknown>): Record<
 }
 
 function requestOf(ctx: ToolContext, vin: string | undefined, s: Step, preview?: Record<string, unknown>) {
-  const base = ctx.config.proxyUrl ?? "<TESLA_COMMAND_PROXY_URL>";
+  const base = REST_ONLY_COMMANDS.has(s.endpoint) ? "<fleet base>" : ctx.config.proxyUrl ?? "<TESLA_COMMAND_PROXY_URL>";
   const body = previewBody(s, preview);
   return { method: "POST", url: `${base}/api/1/vehicles/${vin ? maskVin(vin) : "{vin}"}/command/${s.endpoint}`, body };
 }
@@ -610,6 +611,7 @@ export async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts):
         : { steps: p.steps.map((s) => ({ endpoint: s.endpoint, body: s.body })), ...(p.conditional?.length ? { conditionalSteps: p.conditional } : {}) }),
       vinLast4: vin ? vin.slice(-4) : o.requireExplicitVin ? "(explicit vin required)" : "(resolved at send time)",
       proxyConfigured: Boolean(ctx.config.proxyUrl),
+      ...(p.steps.every((st) => REST_ONLY_COMMANDS.has(st.endpoint)) ? { transport: "Fleet API REST endpoint (REST-only command; no proxy, not signed)" } : {}),
       checksBeforeSend: ["vehicle online (no auto-wake)", "virtual key paired", "local rate limit", ...(o.extraChecks ?? [])],
       ...(o.notes ? { notes: o.notes } : {}),
       estimatedBillableCalls: `${p.steps.length + (p.conditional?.length ?? 0)} command(s) max + up to 3 small reads (state, fleet_status, cached data)`,
@@ -628,12 +630,14 @@ export async function runVehicle(args: ToolArgs, ctx: ToolContext, o: SendOpts):
       ...(p.conditional?.length ? { conditionalSteps: p.conditional.map((s) => ({ ...requestOf(ctx, vin, s), when: s.when })) } : {}),
       wouldCheckFirst: ["GET /api/1/vehicles/{vin} (must be online)", "POST /api/1/vehicles/fleet_status (key paired)", ...(o.extraChecks ?? [])],
       proxyConfigured: Boolean(ctx.config.proxyUrl),
+      ...(p.steps.every((st) => REST_ONLY_COMMANDS.has(st.endpoint)) ? { transport: "Fleet API REST endpoint (REST-only command; no proxy, not signed)" } : {}),
       ...(o.notes ? { notes: o.notes } : {}),
       note: "Validated only; no network call was made.",
     };
   }
   const vin = await ctx.fleet.resolveVin(args.vin, { requireExplicit: o.requireExplicitVin });
-  if (!ctx.config.proxyUrl) {
+  const restOnly = o.previewPlan().steps.every((s) => REST_ONLY_COMMANDS.has(s.endpoint));
+  if (!ctx.config.proxyUrl && !restOnly) {
     throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
       "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) for a private CA (skill vehicle-fleet-setup).");
   }
@@ -696,7 +700,7 @@ function commandTool(spec: CommandSpec): ToolDef {
     kind: "command",
     tool: {
       name: spec.name,
-      description: `${spec.description} Signed via your tesla-http-proxy (scope ${spec.scope}). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes).`,
+      description: `${spec.description} ${REST_ONLY_COMMANDS.has(spec.endpoint) ? "Sent straight to the Fleet API REST endpoint (Tesla's proxy treats it as REST-only; not signed, no proxy needed)" : "Signed via your tesla-http-proxy"} (scope ${spec.scope}). Without confirm=true returns a dry-run. Requires the vehicle to be online already (never auto-wakes).`,
       inputSchema: {
         type: "object",
         properties: { ...VIN_PROP, ...(spec.properties ?? {}), ...CONFIRM_PROPS },

@@ -14,6 +14,17 @@ import { unwrap, type Http } from "./http.js";
 import { NhtsaLimiter, type RateLimiter } from "./ratelimit.js";
 import type { UsageCategory } from "./usage.js";
 
+/**
+ * Vehicle commands that must use the Fleet API REST endpoint, never the command proxy.
+ * Source: teslamotors/vehicle-command pkg/proxy/command.go, where extractCommandAction returns
+ * ErrCommandUseRESTAPI ("command requires using the REST API") for navigation_request ("Sharing
+ * options. These endpoints often require server-side processing, which prevents strict end-to-end
+ * authentication"). The proxy's own fallback forwards these unsigned to the Fleet API; sending them
+ * directly skips proxy builds whose fallback answers with an error first. Only commands this plugin
+ * sends are listed (the managed-charging REST-only commands are not tools here).
+ */
+export const REST_ONLY_COMMANDS: ReadonlySet<string> = new Set(["navigation_request"]);
+
 export type VehicleSummary = {
   vin: string;
   display_name?: string;
@@ -407,8 +418,19 @@ export class FleetClient {
     return this.proxyDispatcher;
   }
 
-  /** Signed command through the installer's tesla-http-proxy. */
+  /**
+   * Vehicle command. Signed through the installer's tesla-http-proxy, except the REST-only
+   * commands in REST_ONLY_COMMANDS, which go straight to the Fleet API (no proxy, unsigned).
+   */
   async command(vin: string, name: string, body: Record<string, unknown>): Promise<{ result?: boolean; reason?: string }> {
+    if (REST_ONLY_COMMANDS.has(name)) {
+      this.limiter.take("command", vin);
+      const base = await this.resolveBaseUrl();
+      const res = await this.call("command", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`, body, undefined, 30_000);
+      this.cache.deletePrefix(`live:${vin}`);
+      this.cache.deletePrefix(`cached:${vin}`);
+      return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
+    }
     if (!this.config.proxyUrl) {
       throw new LocalRefusal("proxy_not_configured", "TESLA_COMMAND_PROXY_URL (or TESLA_FLEET_PROXY_URL) is not set; nothing was sent.",
         "Run your own tesla-http-proxy and set TESLA_COMMAND_PROXY_URL (or its alias TESLA_FLEET_PROXY_URL), plus TESLA_COMMAND_PROXY_CA_CERT (alias TESLA_FLEET_PROXY_CA_FILE) for a private CA (skill vehicle-fleet-setup).");
