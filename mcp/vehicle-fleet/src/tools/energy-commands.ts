@@ -6,6 +6,7 @@
  * Scope: energy_cmds.
  */
 import { FleetApiError, LocalRefusal } from "../errors.js";
+import { ENERGY_COMMAND_TIMEOUT_MS } from "../fleet.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import { bad, bool, classifySendFailure, int, requireIntent, scopeHint } from "./commands.js";
 import { SITE_PROP } from "./energy.js";
@@ -28,14 +29,19 @@ type EnergySpec = {
    * TESLA_FLEET_DRY_RUN). May throw LocalRefusal (nothing sent), return `skip` (a no-op
    * result, nothing sent) or `note` (merged into the send result).
    */
-  precheck?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext) => Promise<{ skip?: Record<string, unknown>; note?: Record<string, unknown> }>;
+  precheck?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext, deadline: number) => Promise<{ skip?: Record<string, unknown>; note?: Record<string, unknown> }>;
   /** Extra billable reads made by `precheck` and `readBack`, shown in previews. */
   extraReads?: string;
   /**
    * Optional post-send read-back, run only after Tesla accepted a confirmed live send. Never
    * resends; its fields are merged into the success result.
    */
-  readBack?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown) => Promise<Record<string, unknown>>;
+  readBack?: (siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown, deadline: number) => Promise<Record<string, unknown>>;
+  /**
+   * Overall time budget (ms from the start of a confirmed live call) for specs with extra reads,
+   * so the whole call finishes inside the MCP client's tool timeout. See OFF_GRID_TOTAL_BUDGET_MS.
+   */
+  budgetMs?: number;
 };
 
 export const OFF_GRID_RESERVE_FIELD = "off_grid_vehicle_charging_reserve_percent";
@@ -58,11 +64,15 @@ export const OFF_GRID_RESERVE_MAX = 95;
  *   precheck "unavailable" with precheckReason "read_failed" or "value_absent".
  * - read failed with login_required / no_refresh_token: the send would fail too, so that error is
  *   returned and nothing is sent.
+ * - the read is capped at OFF_GRID_PRECHECK_TIMEOUT_MS and leaves room for the send; with no room
+ *   for it at all it is skipped (precheck "unavailable", precheckReason "time_budget").
  */
-async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ctx: ToolContext) {
+async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ctx: ToolContext, deadline: number) {
   let data: Record<string, unknown>;
+  const timeoutMs = Math.min(OFF_GRID_PRECHECK_TIMEOUT_MS, deadline - ENERGY_COMMAND_TIMEOUT_MS - ctx.fleet.clock());
+  if (timeoutMs < OFF_GRID_MIN_READ_MS) return { note: { precheck: "unavailable", precheckReason: "time_budget" } };
   try {
-    data = (await ctx.fleet.energySiteInfo(siteId, true)).data;
+    data = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs)).data;
   } catch (e) {
     const code = e instanceof LocalRefusal ? e.code : e instanceof FleetApiError ? e.info.code : undefined;
     if (code === "login_required" || code === "no_refresh_token") throw e;
@@ -83,44 +93,90 @@ async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ct
 /** Off-grid reserve read-back: up to this many fresh site_info reads, this far apart (~15 s in all). */
 export const OFF_GRID_READBACK_TRIES = 3;
 export const OFF_GRID_READBACK_DELAY_MS = 5_000;
+/**
+ * Time limits for set_off_grid_vehicle_charging_reserve, so a confirmed call always returns inside
+ * a 60 s MCP client tool timeout (the common default):
+ * - the whole call (site lookup, pre-read, send, read-back) gets OFF_GRID_TOTAL_BUDGET_MS;
+ * - the pre-read is capped at OFF_GRID_PRECHECK_TIMEOUT_MS and must leave room for the send
+ *   (ENERGY_COMMAND_TIMEOUT_MS); if the time before the send already used too much, nothing is sent
+ *   (budget_exhausted);
+ * - each read-back read is capped at OFF_GRID_READBACK_TIMEOUT_MS, and a read-back read (with its
+ *   pause) only starts if it fits in what is left; otherwise the read-back stops and reports
+ *   "pending" (accepted, not yet confirmed). Never resent.
+ * Worst case: 15 s site lookup + 10 s pre-read + 30 s send = 55 s, and the read-back only uses
+ * what is left of the 55 s.
+ */
+export const OFF_GRID_TOTAL_BUDGET_MS = 55_000;
+export const OFF_GRID_PRECHECK_TIMEOUT_MS = 10_000;
+export const OFF_GRID_READBACK_TIMEOUT_MS = 5_000;
+/** A read is not started with less time than this left. */
+export const OFF_GRID_MIN_READ_MS = 1_000;
+
+/** A finite number, or undefined for anything else (absent, null, string, NaN, Infinity, objects). */
+const finite = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
 
 /**
  * After Tesla accepts an off-grid reserve change, the site can keep reporting the old value for a
  * while (seen in a field test: accepted, immediate read-back still old). Re-read a few times and
  * report honestly, never resending:
  * - "confirmed": the site reports the requested value.
- * - "pending": still the previous value (or no value) after the last read; accepted, not yet visible.
- * - "mismatch": a value that is neither the requested nor the previous one (only when the
+ * - "pending": still the previous value (or no value) after the last read, or the time budget ran
+ *   out before the reads were done (readBackReason "time_budget"); accepted, not yet visible.
+ * - "mismatch": a finite value that is neither the requested nor the previous one (only when the
  *   pre-read gave a previous value; without one, a different value stays "pending").
- * - "unavailable": every read-back failed.
+ * - "unavailable": every read-back failed or returned something that is not a finite number
+ *   (a string, NaN, Infinity, an object); such values are never echoed.
  */
-async function offGridReadBack(siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown): Promise<Record<string, unknown>> {
+async function offGridReadBack(siteId: string, body: Record<string, unknown>, ctx: ToolContext, previous: unknown, deadline: number): Promise<Record<string, unknown>> {
   const want = body[OFF_GRID_RESERVE_FIELD];
-  let last: unknown;
+  const prev = finite(previous);
+  let last: number | undefined;
   let reads = 0;
-  let failed = 0;
+  let unusable = 0;
+  let outOfTime = false;
   for (let i = 0; i < OFF_GRID_READBACK_TRIES; i++) {
+    if (deadline - ctx.fleet.clock() < OFF_GRID_READBACK_DELAY_MS + OFF_GRID_MIN_READ_MS) {
+      outOfTime = true;
+      break;
+    }
     await ctx.fleet.pause(OFF_GRID_READBACK_DELAY_MS);
+    const timeoutMs = Math.min(OFF_GRID_READBACK_TIMEOUT_MS, deadline - ctx.fleet.clock());
+    if (timeoutMs < OFF_GRID_MIN_READ_MS) {
+      outOfTime = true;
+      break;
+    }
     reads++;
-    let v: unknown;
+    let raw: unknown;
     try {
-      v = (await ctx.fleet.energySiteInfo(siteId, true)).data[OFF_GRID_RESERVE_FIELD];
+      raw = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs)).data[OFF_GRID_RESERVE_FIELD];
     } catch {
-      failed++;
+      unusable++;
+      continue;
+    }
+    if (raw === undefined || raw === null) continue; // value absent: keep waiting (pending)
+    const v = finite(raw);
+    if (v === undefined) {
+      unusable++; // present but not a finite number: never echoed, treated like a failed read
       continue;
     }
     last = v;
     if (v === want) return { readBack: "confirmed", readBackValue: v, readBackReads: reads };
-    if (typeof v === "number" && typeof previous === "number" && v !== previous) {
+    if (prev !== undefined && v !== prev) {
       return {
         readBack: "mismatch", readBackValue: v, readBackReads: reads,
         readBackMessage: `Tesla accepted the change, but the site now reports ${v}, not the requested ${String(want)}. Tell the user; do not resend without asking.`,
       };
     }
   }
+  if (outOfTime) {
+    return {
+      readBack: "pending", readBackReason: "time_budget", readBackValue: last ?? null, readBackReads: reads,
+      readBackMessage: `Tesla accepted the change; the read-back stopped after ${reads} read${reads === 1 ? "" : "s"} to stay inside the tool time limit${last === undefined ? "" : `, and the site still reported ${last}`}. Check again later with get_energy_site_info. Not resent.`,
+    };
+  }
   const waited = Math.round((OFF_GRID_READBACK_TRIES * OFF_GRID_READBACK_DELAY_MS) / 1000);
-  if (failed === reads) {
-    return { readBack: "unavailable", readBackReads: reads, readBackMessage: "Tesla accepted the change, but the read-back failed; check later with get_energy_site_info." };
+  if (reads > 0 && unusable === reads) {
+    return { readBack: "unavailable", readBackReads: reads, readBackMessage: "Tesla accepted the change, but the read-back failed or returned no usable number; check later with get_energy_site_info." };
   }
   return {
     readBack: "pending", readBackValue: last ?? null, readBackReads: reads,
@@ -138,12 +194,13 @@ const SPECS: EnergySpec[] = [
   },
   {
     name: "set_off_grid_vehicle_charging_reserve", path: "off_grid_vehicle_charging_reserve",
-    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop). After Tesla accepts, re-reads site_info up to 3 times over about 15 s and reports readBack: confirmed, pending (accepted but the site still shows the old value; the Powerwall can report it late), mismatch, or unavailable. Never resends.",
+    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop). After Tesla accepts, re-reads site_info up to 3 times over about 15 s and reports readBack: confirmed, pending (accepted but the site still shows the old value; the Powerwall can report it late, or the 55 s time limit ran out: readBackReason time_budget), mismatch, or unavailable. Never resends.",
     properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: OFF_GRID_RESERVE_MIN, maximum: OFF_GRID_RESERVE_MAX } },
     required: [OFF_GRID_RESERVE_FIELD],
     build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, OFF_GRID_RESERVE_MIN, OFF_GRID_RESERVE_MAX) }),
     precheck: offGridPrecheck,
     readBack: offGridReadBack,
+    budgetMs: OFF_GRID_TOTAL_BUDGET_MS,
     extraReads: `1 site_info read before + up to ${OFF_GRID_READBACK_TRIES} after (about ${(OFF_GRID_READBACK_TRIES * OFF_GRID_READBACK_DELAY_MS) / 1000} s read-back)`,
   },
   {
@@ -273,19 +330,23 @@ function energyTool(spec: EnergySpec): ToolDef {
           note: "Validated only; no network call was made.",
         };
       }
+      const deadline = ctx.fleet.clock() + (spec.budgetMs ?? Number.POSITIVE_INFINITY);
       const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id);
       let note: Record<string, unknown> = {};
       if (spec.precheck) {
-        const pre = await spec.precheck(siteId, body, ctx);
+        const pre = await spec.precheck(siteId, body, ctx, deadline);
         if (pre.skip) return { command: spec.name, ...pre.skip };
         note = pre.note ?? {};
+      }
+      if (deadline - ctx.fleet.clock() < ENERGY_COMMAND_TIMEOUT_MS) {
+        throw new LocalRefusal("budget_exhausted", `Nothing was sent: the steps before the send took too long to leave room for it inside the tool time limit (${Math.round((spec.budgetMs ?? 0) / 1000)} s). Try again.`);
       }
       try {
         const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
         const outcome = interpretEnergyResponse(raw);
         const rawShape = rawShapeOf(raw);
         if (outcome.ok) {
-          const rb = spec.readBack ? await spec.readBack(siteId, body, ctx, note.previous) : {};
+          const rb = spec.readBack ? await spec.readBack(siteId, body, ctx, note.previous, deadline) : {};
           return { ok: true, sent: true, command: spec.name, ...note, result: outcome.result, rawShape, ...rb, readBackWith: "get_energy_site_info" };
         }
         return { ok: false, command: spec.name, ...note, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };

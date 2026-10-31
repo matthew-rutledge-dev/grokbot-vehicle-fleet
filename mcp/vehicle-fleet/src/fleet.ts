@@ -56,6 +56,8 @@ export const NHTSA_BASE_URL = "https://api.nhtsa.gov";
 export const ENERGY_LIVE_TTL_MS = 60_000;
 export const ENERGY_INFO_TTL_MS = 10 * 60_000;
 export const ENERGY_HISTORY_TTL_MS = 5 * 60_000;
+/** Timeout for one energy-site command POST (never retried). */
+export const ENERGY_COMMAND_TIMEOUT_MS = 30_000;
 
 /** One energy product from GET /api/1/products (fields used here only). */
 export type EnergyProduct = { energy_site_id: number | string; site_name?: string; resource_type?: string } & Record<string, unknown>;
@@ -69,6 +71,8 @@ export function buildProxyDispatcher(caPath: string | undefined): Dispatcher | u
 
 export type FleetClientOptions = {
   sleep?: (ms: number) => Promise<void>;
+  /** Clock for time budgets (injectable for tests). */
+  now?: () => number;
   wakePollMs?: number;
   wakeTimeoutMs?: number;
   /** Local NHTSA limiter (injectable for tests). */
@@ -81,6 +85,7 @@ export class FleetClient {
   private proxyDispatcherLoaded = false;
   readonly cache = new TtlCache();
   private readonly sleep: (ms: number) => Promise<void>;
+  private readonly now: () => number;
   private readonly wakePollMs: number;
   private readonly wakeTimeoutMs: number;
   private readonly nhtsaLimiter: NhtsaLimiter;
@@ -94,6 +99,7 @@ export class FleetClient {
   ) {
     this.baseUrl = config.baseUrl;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+    this.now = opts.now ?? Date.now;
     this.wakePollMs = opts.wakePollMs ?? 5_000;
     this.wakeTimeoutMs = opts.wakeTimeoutMs ?? 60_000;
     this.nhtsaLimiter = opts.nhtsaLimiter ?? new NhtsaLimiter();
@@ -340,12 +346,12 @@ export class FleetClient {
     });
   }
 
-  private async energyGet(key: string, ttl: number, siteId: string, path: string): Promise<{ data: Record<string, unknown>; ageSec: number }> {
+  private async energyGet(key: string, ttl: number, siteId: string, path: string, timeoutMs?: number): Promise<{ data: Record<string, unknown>; ageSec: number }> {
     const hit = this.cache.get<Record<string, unknown>>(key, ttl);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", `site:${siteId}`);
     const base = await this.resolveBaseUrl();
-    const res = await this.call("data", "GET", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`);
+    const res = await this.call("data", "GET", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, undefined, undefined, timeoutMs);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
@@ -360,7 +366,7 @@ export class FleetClient {
     this.limiter.take("command", `site:${siteId}`);
     const base = await this.resolveBaseUrl();
     try {
-      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, 30_000);
+      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, ENERGY_COMMAND_TIMEOUT_MS);
       return res.body;
     } finally {
       // Always, even when the POST throws (5xx, timeout, dropped connection): the outcome may be
@@ -376,10 +382,13 @@ export class FleetClient {
     return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");
   }
 
-  /** GET /energy_sites/{id}/site_info (cached 10 min; fresh=true skips the cache, for send-time checks). */
-  energySiteInfo(siteId: string, fresh = false) {
+  /**
+   * GET /energy_sites/{id}/site_info (cached 10 min; fresh=true skips the cache, for send-time checks).
+   * timeoutMs bounds this one request (default: the HTTP layer's 15 s).
+   */
+  energySiteInfo(siteId: string, fresh = false, timeoutMs?: number) {
     if (fresh) this.cache.delete(`energy_info:${siteId}`);
-    return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info");
+    return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info", timeoutMs);
   }
 
   /** GET /energy_sites/{id}/calendar_history with an already-validated, bounded query (cached 5 min). */
@@ -457,6 +466,11 @@ export class FleetClient {
   /** Bounded wait used by post-send read-backs (injectable sleep, so tests do not wait). */
   pause(ms: number): Promise<void> {
     return this.sleep(ms);
+  }
+
+  /** Current time in ms (injectable), for per-command time budgets. */
+  clock(): number {
+    return this.now();
   }
 
   /**
