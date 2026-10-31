@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.3
+
+Review follow-ups from 0.7.2. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- `set_off_grid_vehicle_charging_reserve` time budget: the 0.7.2 read-back (up to 3 reads, 5 s apart) could, in the worst case, run past a 60 s MCP client timeout. A confirmed live call now has a 55 s budget for the site lookup, pre-read, send and read-back. The pre-read is capped at 10 s and must leave room for the 30 s send; if the steps before the send already used too much time, nothing is sent (`budget_exhausted`). Each read-back read is capped at 5 s, and a read is only started if it (with its 5 s pause) fits in what is left; otherwise the read-back stops and reports `pending` with `readBackReason: "time_budget"`. Never resent.
+- Read-back values: only a finite number counts. A string, `NaN`, `Infinity` (e.g. `1e999` in the JSON), an array or an object is never echoed and counts as a failed read, so it can be neither `confirmed` nor `mismatch`; if every read failed or was unusable, the result is `unavailable`.
+- Tests: the proxied vehicle-command path clears cached vehicle data in its `finally` on success, a car refusal, an HTTP 500 and a dropped connection (the REST-only path was already covered).
+- `remote_boombox` evidence (docs): `fart` (sound id 0) was verified live on 2026-10-30 with the owner outside the parked car and the phone key inside: accepted and heard outside the car. In the same session the car refused `locate_ping` (robotaxi mode only). No vehicle identifiers recorded.
+
 ## 0.7.2
 
 Field-test follow-ups and review fixes from 0.7.1. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
