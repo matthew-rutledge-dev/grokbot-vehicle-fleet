@@ -99,7 +99,7 @@ export class FleetClient {
   ) {
     this.baseUrl = config.baseUrl;
     this.sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-    this.now = opts.now ?? Date.now;
+    this.now = opts.now ?? (() => performance.now());
     this.wakePollMs = opts.wakePollMs ?? 5_000;
     this.wakeTimeoutMs = opts.wakeTimeoutMs ?? 60_000;
     this.nhtsaLimiter = opts.nhtsaLimiter ?? new NhtsaLimiter();
@@ -122,9 +122,10 @@ export class FleetClient {
 
   /**
    * Authenticated call with one retry after a bodiless 401 (expired access token).
-   * When `deadline` is set (epoch ms), token refresh, the request, and that one retry all
-   * share it: each step is capped to the time left, and a retry is not started if no time
-   * remains (the original 401 is thrown). Without a deadline, behaviour is unchanged.
+   * When `deadline` is set (ms on the same clock as `clock()`, monotonic by default),
+   * token refresh, the request, and that one retry all share it: each step is capped to
+   * the time left, and a retry is not started if no time remains (the original 401 is
+   * thrown). Without a deadline, behaviour is unchanged.
    */
   private async call(category: UsageCategory, method: "GET" | "POST", url: string, json?: unknown, dispatcher?: Dispatcher, timeoutMs?: number, deadline?: number) {
     const token = await this.tokens.getAccessToken({ timeoutMs: this.capTimeout(deadline, HTTP_DEFAULT_TIMEOUT_MS) });
@@ -188,13 +189,13 @@ export class FleetClient {
   }
 
   /** GET /api/1/vehicles. fresh=false reuses a list fetched in the last 5 min. */
-  async listVehicles(fresh = true): Promise<VehicleSummary[]> {
+  async listVehicles(fresh = true, deadline?: number): Promise<VehicleSummary[]> {
     if (!fresh) {
       const hit = this.cache.get<VehicleSummary[]>("vehicles", VEHICLE_LIST_TTL_MS);
       if (hit) return hit.value;
     }
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("other", "GET", `${base}/api/1/vehicles`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("other", "GET", `${base}/api/1/vehicles`, undefined, undefined, undefined, deadline);
     const list = unwrap<VehicleSummary[]>(res.body) ?? [];
     for (const v of list) this.cache.set(`state:${v.vin}`, v);
     this.cache.set("vehicles", list);
@@ -202,13 +203,13 @@ export class FleetClient {
   }
 
   /** Resolve the VIN: explicit > TESLA_DEFAULT_VIN > the only vehicle on the account. */
-  async resolveVin(vin: unknown, opts: { requireExplicit?: boolean } = {}): Promise<string> {
+  async resolveVin(vin: unknown, opts: { requireExplicit?: boolean; deadline?: number } = {}): Promise<string> {
     if (typeof vin === "string" && vin.trim()) return vin.trim().toUpperCase();
     if (opts.requireExplicit) {
       throw new LocalRefusal("vin_required", "This command needs an explicit vin (no default) because it can open the vehicle.");
     }
     if (this.config.defaultVin) return this.config.defaultVin.toUpperCase();
-    const list = await this.listVehicles(false);
+    const list = await this.listVehicles(false, opts.deadline);
     if (list.length === 1) return list[0].vin;
     if (list.length === 0) throw new LocalRefusal("no_vehicles", "No vehicles on this account.");
     throw new LocalRefusal("vin_ambiguous", "More than one vehicle; pass vin.", undefined, {
@@ -217,21 +218,21 @@ export class FleetClient {
   }
 
   /** Connectivity state from GET /api/1/vehicles/{vin} (cached 30 s). */
-  async getVehicle(vin: string, fresh = false): Promise<VehicleSummary> {
+  async getVehicle(vin: string, fresh = false, deadline?: number): Promise<VehicleSummary> {
     if (!fresh) {
       const hit = this.cache.get<VehicleSummary>(`state:${vin}`, STATE_TTL_MS);
       if (hit) return hit.value;
     }
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("other", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("other", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}`, undefined, undefined, undefined, deadline);
     const v = unwrap<VehicleSummary>(res.body);
     this.cache.set(`state:${vin}`, v);
     return v;
   }
 
   /** Throws LocalRefusal unless the vehicle is online. Never wakes. */
-  async requireOnline(vin: string): Promise<VehicleSummary> {
-    const v = await this.getVehicle(vin, true);
+  async requireOnline(vin: string, deadline?: number): Promise<VehicleSummary> {
+    const v = await this.getVehicle(vin, true, deadline);
     if (v?.state !== "online") {
       throw new LocalRefusal("vehicle_not_online", `Vehicle is ${v?.state ?? "unknown"}; nothing was sent.`,
         "Use cached data, try later, or ask the user to confirm wake_vehicle (costs a wake).", { state: v?.state });
@@ -239,11 +240,11 @@ export class FleetClient {
     return v;
   }
 
-  async fleetStatus(vin: string): Promise<FleetStatus> {
+  async fleetStatus(vin: string, deadline?: number): Promise<FleetStatus> {
     const hit = this.cache.get<FleetStatus>(`fleet_status:${vin}`, FLEET_STATUS_TTL_MS);
     if (hit) return hit.value;
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("other", "POST", `${base}/api/1/vehicles/fleet_status`, { vins: [vin] });
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("other", "POST", `${base}/api/1/vehicles/fleet_status`, { vins: [vin] }, undefined, undefined, deadline);
     const r = unwrap<Record<string, unknown>>(res.body) ?? {};
     const paired = Array.isArray(r.key_paired_vins) ? (r.key_paired_vins as string[]) : undefined;
     const unpaired = Array.isArray(r.unpaired_vins) ? (r.unpaired_vins as string[]) : undefined;
@@ -260,27 +261,27 @@ export class FleetClient {
   }
 
   /** Live vehicle_data for the given endpoints. Caller must ensure online first. */
-  async vehicleDataLive(vin: string, endpoints: string[]): Promise<{ data: Record<string, unknown>; ageSec: number }> {
+  async vehicleDataLive(vin: string, endpoints: string[], deadline?: number): Promise<{ data: Record<string, unknown>; ageSec: number }> {
     const key = `live:${vin}:${[...endpoints].sort().join(";")}`;
     const hit = this.cache.get<Record<string, unknown>>(key, LIVE_TTL_MS);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", vin);
-    const base = await this.resolveBaseUrl();
+    const base = await this.resolveBaseUrl(deadline);
     const q = encodeURIComponent(endpoints.join(";"));
-    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data?endpoints=${q}`);
+    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data?endpoints=${q}`, undefined, undefined, undefined, deadline);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
   }
 
   /** vehicle_data_cached: last reported data; never wakes, works asleep. */
-  async vehicleDataCached(vin: string): Promise<{ data: Record<string, unknown>; ageSec: number }> {
+  async vehicleDataCached(vin: string, deadline?: number): Promise<{ data: Record<string, unknown>; ageSec: number }> {
     const key = `cached:${vin}`;
     const hit = this.cache.get<Record<string, unknown>>(key, CACHED_TTL_MS);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", vin);
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data_cached`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("data", "GET", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/vehicle_data_cached`, undefined, undefined, undefined, deadline);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
@@ -288,35 +289,35 @@ export class FleetClient {
 
   // ---- Ownership reads (read-only; never wake the vehicle). ----
 
-  private async vehicleGet(key: string, ttl: number, vin: string, path: string): Promise<{ data: unknown; ageSec: number }> {
+  private async vehicleGet(key: string, ttl: number, vin: string, path: string, deadline?: number): Promise<{ data: unknown; ageSec: number }> {
     const hit = this.cache.get<unknown>(key, ttl);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", vin);
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("data", "GET", `${base}${path}`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("data", "GET", `${base}${path}`, undefined, undefined, undefined, deadline);
     const data = unwrap<unknown>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
   }
 
   /** GET /api/1/vehicles/{vin}/recent_alerts (cached 5 min). */
-  recentAlerts(vin: string) {
-    return this.vehicleGet(`alerts:${vin}`, RECENT_ALERTS_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/recent_alerts`);
+  recentAlerts(vin: string, deadline?: number) {
+    return this.vehicleGet(`alerts:${vin}`, RECENT_ALERTS_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/recent_alerts`, deadline);
   }
 
   /** GET /api/1/vehicles/{vin}/release_notes (cached 1 h). */
-  releaseNotes(vin: string) {
-    return this.vehicleGet(`release_notes:${vin}`, RELEASE_NOTES_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/release_notes`);
+  releaseNotes(vin: string, deadline?: number) {
+    return this.vehicleGet(`release_notes:${vin}`, RELEASE_NOTES_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/release_notes`, deadline);
   }
 
   /** GET /api/1/vehicles/{vin}/service_data (cached 10 min). */
-  serviceData(vin: string) {
-    return this.vehicleGet(`service:${vin}`, SERVICE_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/service_data`);
+  serviceData(vin: string, deadline?: number) {
+    return this.vehicleGet(`service:${vin}`, SERVICE_TTL_MS, vin, `/api/1/vehicles/${encodeURIComponent(vin)}/service_data`, deadline);
   }
 
   /** GET /api/1/dx/warranty/details?vin= (cached 6 h). */
-  warrantyDetails(vin: string) {
-    return this.vehicleGet(`warranty:${vin}`, WARRANTY_TTL_MS, vin, `/api/1/dx/warranty/details?vin=${encodeURIComponent(vin)}`);
+  warrantyDetails(vin: string, deadline?: number) {
+    return this.vehicleGet(`warranty:${vin}`, WARRANTY_TTL_MS, vin, `/api/1/dx/warranty/details?vin=${encodeURIComponent(vin)}`, deadline);
   }
 
   /**
@@ -405,8 +406,8 @@ export class FleetClient {
   }
 
   /** GET /energy_sites/{id}/live_status (cached 60 s). Includes wall_connectors when present. */
-  energyLiveStatus(siteId: string) {
-    return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status");
+  energyLiveStatus(siteId: string, deadline?: number) {
+    return this.energyGet(`energy_live:${siteId}`, ENERGY_LIVE_TTL_MS, siteId, "live_status", undefined, deadline);
   }
 
   /**
@@ -419,28 +420,28 @@ export class FleetClient {
   }
 
   /** GET /energy_sites/{id}/calendar_history with an already-validated, bounded query (cached 5 min). */
-  energyHistory(siteId: string, query: Record<string, string>) {
+  energyHistory(siteId: string, query: Record<string, string>, deadline?: number) {
     const q = new URLSearchParams(query).toString();
-    return this.energyGet(`energy_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `calendar_history?${q}`);
+    return this.energyGet(`energy_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `calendar_history?${q}`, undefined, deadline);
   }
 
   /** Wall Connector charge history: GET telemetry_history?kind=charge (bounded dates; cached like energy history). */
-  chargeHistory(siteId: string, query: Record<string, string>) {
+  chargeHistory(siteId: string, query: Record<string, string>, deadline?: number) {
     const q = new URLSearchParams(query).toString();
-    return this.energyGet(`charge_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `telemetry_history?${q}`);
+    return this.energyGet(`charge_hist:${siteId}:${q}`, ENERGY_HISTORY_TTL_MS, siteId, `telemetry_history?${q}`, undefined, deadline);
   }
 
   /** POST wake_up, then poll connectivity state (bounded). Only via the wake_vehicle tool. */
-  async wakeUp(vin: string): Promise<{ state?: string; waitedSec: number }> {
+  async wakeUp(vin: string, deadline?: number): Promise<{ state?: string; waitedSec: number }> {
     this.limiter.take("wake", vin);
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("wake", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/wake_up`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("wake", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/wake_up`, undefined, undefined, undefined, deadline);
     let v = unwrap<VehicleSummary>(res.body);
     let waited = 0;
     while (v?.state !== "online" && waited < this.wakeTimeoutMs) {
       await this.sleep(this.wakePollMs);
       waited += this.wakePollMs;
-      v = await this.getVehicle(vin, true);
+      v = await this.getVehicle(vin, true, deadline);
     }
     this.cache.deletePrefix(`live:${vin}`);
     return { state: v?.state, waitedSec: Math.round(waited / 1000) };
@@ -458,12 +459,12 @@ export class FleetClient {
    * Vehicle command. Signed through the installer's tesla-http-proxy, except the REST-only
    * commands in REST_ONLY_COMMANDS, which go straight to the Fleet API (no proxy, unsigned).
    */
-  async command(vin: string, name: string, body: Record<string, unknown>): Promise<{ result?: boolean; reason?: string }> {
+  async command(vin: string, name: string, body: Record<string, unknown>, deadline?: number): Promise<{ result?: boolean; reason?: string }> {
     if (REST_ONLY_COMMANDS.has(name)) {
       this.limiter.take("command", vin);
-      const base = await this.resolveBaseUrl();
+      const base = await this.resolveBaseUrl(deadline);
       try {
-        const res = await this.call("command", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`, body, undefined, 30_000);
+        const res = await this.call("command", "POST", `${base}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`, body, undefined, 30_000, deadline);
         return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
       } finally {
         // Also on errors: a timeout or garbled reply may still have reached the car.
@@ -477,7 +478,7 @@ export class FleetClient {
     this.limiter.take("command", vin);
     const url = `${this.config.proxyUrl}/api/1/vehicles/${encodeURIComponent(vin)}/command/${name}`;
     try {
-      const res = await this.call("command", "POST", url, body, this.proxy(), 30_000);
+      const res = await this.call("command", "POST", url, body, this.proxy(), 30_000, deadline);
       return unwrap<{ result?: boolean; reason?: string }>(res.body) ?? {};
     } finally {
       this.invalidateVehicle(vin);
@@ -495,7 +496,7 @@ export class FleetClient {
     return this.sleep(ms);
   }
 
-  /** Current time in ms (injectable), for per-command time budgets. */
+  /** Current time in ms (injectable; defaults to a monotonic clock), for per-command time budgets. */
   clock(): number {
     return this.now();
   }
@@ -506,11 +507,11 @@ export class FleetClient {
    * the Fleet API directly (not the proxy): the message is already signed locally.
    * Billed as a command; never retried.
    */
-  async signedCommand(vin: string, routableMessageB64: string): Promise<string> {
+  async signedCommand(vin: string, routableMessageB64: string, deadline?: number): Promise<string> {
     this.limiter.take("command", vin);
-    const base = await this.resolveBaseUrl();
+    const base = await this.resolveBaseUrl(deadline);
     const url = `${base}/api/1/vehicles/${encodeURIComponent(vin)}/signed_command`;
-    const res = await this.call("command", "POST", url, { routable_message: routableMessageB64 }, undefined, 30_000);
+    const res = await this.call("command", "POST", url, { routable_message: routableMessageB64 }, undefined, 30_000, deadline);
     this.cache.deletePrefix(`live:${vin}`);
     this.cache.deletePrefix(`cached:${vin}`);
     const r = unwrap<unknown>(res.body);

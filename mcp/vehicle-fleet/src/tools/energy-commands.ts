@@ -336,6 +336,7 @@ function energyTool(spec: EnergySpec): ToolDef {
           note: "Validated only; no network call was made.",
         };
       }
+      // clock() is injectable and monotonic by default (not Date.now).
       const deadline = ctx.fleet.clock() + (spec.budgetMs ?? Number.POSITIVE_INFINITY);
       try {
         const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id, deadline);

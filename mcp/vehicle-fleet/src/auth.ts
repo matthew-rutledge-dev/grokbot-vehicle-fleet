@@ -13,7 +13,7 @@
  *   before (first run, or the operator pasted a fresh token after re-consent).
  */
 import type { Config } from "./config.js";
-import { FleetApiError, LocalRefusal } from "./errors.js";
+import { DeadlineExceeded, FleetApiError, LocalRefusal } from "./errors.js";
 import type { Http } from "./http.js";
 import type { RateLimiter } from "./ratelimit.js";
 import { AccessTokenExporter } from "./tokenexport.js";
@@ -47,16 +47,35 @@ export class TokenManager {
   /**
    * Refresh now, sharing any refresh already in flight (single-flight; the store lock and
    * the auth rate limiter apply as for every refresh). Used by the export keep-fresh loop.
-   * `timeoutMs` bounds only a refresh started by this call; an already in-flight refresh keeps
-   * the timeout it was started with.
+   * `timeoutMs` bounds a refresh started by this call (store lock wait and HTTP). Joining an
+   * already in-flight refresh is also capped to this caller's `timeoutMs`; the in-flight
+   * refresh itself is not cancelled.
    */
   forceRefresh(opts?: { timeoutMs?: number }): Promise<string> {
     if (!this.refreshing) {
       this.refreshing = this.refresh(opts?.timeoutMs).finally(() => {
         this.refreshing = undefined;
       });
+      return this.refreshing;
     }
-    return this.refreshing;
+    return this.waitForRefresh(this.refreshing, opts?.timeoutMs);
+  }
+
+  /** Wait for an in-flight refresh, optionally bounded by this caller's timeout. */
+  private async waitForRefresh(pending: Promise<string>, timeoutMs?: number): Promise<string> {
+    if (timeoutMs === undefined) return pending;
+    if (timeoutMs <= 0) throw new DeadlineExceeded();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<string>((_, reject) => {
+          timer = setTimeout(() => reject(new DeadlineExceeded()), timeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
   }
 
   /** Expiry (ms epoch) of the in-memory access token, if any. */
@@ -142,7 +161,19 @@ export class TokenManager {
     const clientId = this.config.clientId;
     if (!clientId) throw new LocalRefusal("not_configured", "TESLA_CLIENT_ID (or its alias TESLA_FLEET_CLIENT_ID) is not set.", "Set the plugin variable TESLA_CLIENT_ID, or export TESLA_FLEET_CLIENT_ID from your env loader (the auth helper also accepts TESLA_FLEET_CLIENT_SECRET for TESLA_CLIENT_SECRET).");
 
-    return this.store.withLock(async () => {
+    const started = this.now();
+    // Sub-20 ms "waits" are treated as zero so a caller-capped duration is not
+    // shrunk by clock noise (exact remaining-time tests use a separate fake clock).
+    const remaining = (): number | undefined => {
+      if (timeoutMs === undefined) return undefined;
+      const waited = Math.max(0, this.now() - started);
+      return Math.max(0, timeoutMs - (waited < 20 ? 0 : waited));
+    };
+
+    try {
+      return await this.store.withLock(async () => {
+        const left = remaining();
+        if (left === 0) throw new DeadlineExceeded();
       const data: StoredTokens = this.store.read() ?? { version: 1 };
       const seen = new Set(data.seen_seed_sha256 ?? []);
       const seed = this.config.refreshTokenSeed;
@@ -175,7 +206,7 @@ export class TokenManager {
             method: "POST",
             url: `${this.config.authBaseUrl}/oauth2/v3/token`,
             form: { grant_type: "refresh_token", client_id: clientId, refresh_token: used },
-            timeoutMs,
+            timeoutMs: left,
           },
           "auth", // authentication endpoints are not billed; counted for info only
         );
@@ -203,7 +234,13 @@ export class TokenManager {
       // Opt-in export for trusted local consumers (off unless TESLA_FLEET_ACCESS_TOKEN_EXPORT_FILE is set).
       this.exporter.write(tok.access_token);
       return tok.access_token;
-    });
+      }, timeoutMs ?? 10_000);
+    } catch (e) {
+      if (timeoutMs !== undefined && e instanceof Error && e.message.startsWith("timed out waiting for the lock")) {
+        throw new DeadlineExceeded();
+      }
+      throw e;
+    }
   }
 }
 
