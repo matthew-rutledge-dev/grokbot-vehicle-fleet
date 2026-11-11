@@ -8,9 +8,9 @@ import { Agent, type Dispatcher } from "undici";
 import type { TokenManager } from "./auth.js";
 import { TtlCache } from "./cache.js";
 import { REGION_BASE_URLS, type Config } from "./config.js";
-import { FleetApiError, LocalRefusal } from "./errors.js";
+import { DeadlineExceeded, FleetApiError, LocalRefusal } from "./errors.js";
 import { SignedCommandError } from "./signed/crypto.js";
-import { unwrap, type Http } from "./http.js";
+import { HTTP_DEFAULT_TIMEOUT_MS, unwrap, type Http } from "./http.js";
 import { NhtsaLimiter, type RateLimiter } from "./ratelimit.js";
 import type { UsageCategory } from "./usage.js";
 
@@ -56,7 +56,7 @@ export const NHTSA_BASE_URL = "https://api.nhtsa.gov";
 export const ENERGY_LIVE_TTL_MS = 60_000;
 export const ENERGY_INFO_TTL_MS = 10 * 60_000;
 export const ENERGY_HISTORY_TTL_MS = 5 * 60_000;
-/** Timeout for one energy-site command POST (never retried). */
+/** Timeout for one energy-site command POST (the request itself; a 401 retry is separate unless a deadline is passed). */
 export const ENERGY_COMMAND_TIMEOUT_MS = 30_000;
 
 /** One energy product from GET /api/1/products (fields used here only). */
@@ -109,30 +109,57 @@ export class FleetClient {
     return this.http.billable;
   }
 
-  /** Authenticated call with one retry after a bodiless 401 (expired access token). */
-  private async call(category: UsageCategory, method: "GET" | "POST", url: string, json?: unknown, dispatcher?: Dispatcher, timeoutMs?: number) {
-    const token = await this.tokens.getAccessToken();
+  /**
+   * Cap `want` to the time left before `deadline`. Throws DeadlineExceeded when none is left,
+   * so the caller does not start a refresh or request that would run past the limit.
+   */
+  private capTimeout(deadline: number | undefined, want: number): number {
+    if (deadline === undefined) return want;
+    const left = deadline - this.now();
+    if (left <= 0) throw new DeadlineExceeded();
+    return Math.min(want, left);
+  }
+
+  /**
+   * Authenticated call with one retry after a bodiless 401 (expired access token).
+   * When `deadline` is set (epoch ms), token refresh, the request, and that one retry all
+   * share it: each step is capped to the time left, and a retry is not started if no time
+   * remains (the original 401 is thrown). Without a deadline, behaviour is unchanged.
+   */
+  private async call(category: UsageCategory, method: "GET" | "POST", url: string, json?: unknown, dispatcher?: Dispatcher, timeoutMs?: number, deadline?: number) {
+    const token = await this.tokens.getAccessToken({ timeoutMs: this.capTimeout(deadline, HTTP_DEFAULT_TIMEOUT_MS) });
     try {
-      return await this.http.request({ method, url, token, json, dispatcher, timeoutMs }, category);
+      return await this.http.request({ method, url, token, json, dispatcher, timeoutMs: this.capTimeout(deadline, timeoutMs ?? HTTP_DEFAULT_TIMEOUT_MS) }, category);
     } catch (e) {
       if (e instanceof FleetApiError && e.info.status === 401 && e.info.code === "unauthorized") {
         this.tokens.invalidate();
-        const fresh = await this.tokens.getAccessToken();
-        return this.http.request({ method, url, token: fresh, json, dispatcher, timeoutMs }, category);
+        let fresh: string;
+        try {
+          fresh = await this.tokens.getAccessToken({ timeoutMs: this.capTimeout(deadline, HTTP_DEFAULT_TIMEOUT_MS) });
+        } catch (err) {
+          if (err instanceof DeadlineExceeded) throw e;
+          throw err;
+        }
+        try {
+          return await this.http.request({ method, url, token: fresh, json, dispatcher, timeoutMs: this.capTimeout(deadline, timeoutMs ?? HTTP_DEFAULT_TIMEOUT_MS) }, category);
+        } catch (err) {
+          if (err instanceof DeadlineExceeded) throw e;
+          throw err;
+        }
       }
       throw e;
     }
   }
 
   /** Base URL: explicit config > region > stored > auto-detect via /api/1/users/region. */
-  async resolveBaseUrl(): Promise<string> {
+  async resolveBaseUrl(deadline?: number): Promise<string> {
     if (this.baseUrl) return this.baseUrl;
     const stored = this.tokens.storedBaseUrl();
     if (stored) return (this.baseUrl = stored);
     let lastErr: unknown;
     for (const region of ["na", "eu"]) {
       try {
-        const res = await this.call("other", "GET", `${REGION_BASE_URLS[region]}/api/1/users/region`);
+        const res = await this.call("other", "GET", `${REGION_BASE_URLS[region]}/api/1/users/region`, undefined, undefined, undefined, deadline);
         const r = unwrap<{ region?: string; fleet_api_base_url?: string }>(res.body);
         const url = r?.fleet_api_base_url;
         if (!url || !/^https:\/\/fleet-api\.prd\.[a-z]+\.vn\.cloud\.tesla\.(com|cn)$/.test(url)) {
@@ -310,13 +337,13 @@ export class FleetClient {
   // ---- Energy sites (Powerwall / solar / Wall Connector via site live_status). Read-only. ----
 
   /** Energy products from GET /api/1/products (vehicles filtered out). fresh=false reuses a 5-min list. */
-  async listEnergySites(fresh = true): Promise<EnergyProduct[]> {
+  async listEnergySites(fresh = true, deadline?: number): Promise<EnergyProduct[]> {
     if (!fresh) {
       const hit = this.cache.get<EnergyProduct[]>("energy_sites", VEHICLE_LIST_TTL_MS);
       if (hit) return hit.value;
     }
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("other", "GET", `${base}/api/1/products`);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("other", "GET", `${base}/api/1/products`, undefined, undefined, undefined, deadline);
     const all = unwrap<Array<Record<string, unknown>>>(res.body) ?? [];
     const sites = all.filter((p) => p && p.energy_site_id !== undefined && p.energy_site_id !== null) as EnergyProduct[];
     this.cache.set("energy_sites", sites);
@@ -324,7 +351,7 @@ export class FleetClient {
   }
 
   /** Site id: explicit > TESLA_DEFAULT_ENERGY_SITE_ID > the only energy site on the account. */
-  async resolveSiteId(id: unknown): Promise<string> {
+  async resolveSiteId(id: unknown, deadline?: number): Promise<string> {
     const clean = (v: string) => {
       if (!/^\d{1,20}$/.test(v)) throw new LocalRefusal("bad_site_id", "energy_site_id must be a string of digits (e.g. \"1234567890\").");
       return v;
@@ -334,7 +361,7 @@ export class FleetClient {
     }
     if (typeof id === "string" && id.trim()) return clean(id.trim());
     if (this.config.defaultEnergySiteId) return clean(this.config.defaultEnergySiteId);
-    const sites = await this.listEnergySites(false);
+    const sites = await this.listEnergySites(false, deadline);
     const ids = [...new Set(sites.map((s) => String(s.energy_site_id)))];
     if (sites.some((s) => typeof s.energy_site_id === "number" && !Number.isSafeInteger(s.energy_site_id))) {
       throw new LocalRefusal("bad_site_id", "An energy_site_id from the API is too large to handle exactly; set TESLA_DEFAULT_ENERGY_SITE_ID to the id as a string.");
@@ -346,12 +373,12 @@ export class FleetClient {
     });
   }
 
-  private async energyGet(key: string, ttl: number, siteId: string, path: string, timeoutMs?: number): Promise<{ data: Record<string, unknown>; ageSec: number }> {
+  private async energyGet(key: string, ttl: number, siteId: string, path: string, timeoutMs?: number, deadline?: number): Promise<{ data: Record<string, unknown>; ageSec: number }> {
     const hit = this.cache.get<Record<string, unknown>>(key, ttl);
     if (hit) return { data: hit.value, ageSec: hit.ageSec };
     this.limiter.take("data", `site:${siteId}`);
-    const base = await this.resolveBaseUrl();
-    const res = await this.call("data", "GET", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, undefined, undefined, timeoutMs);
+    const base = await this.resolveBaseUrl(deadline);
+    const res = await this.call("data", "GET", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, undefined, undefined, timeoutMs, deadline);
     const data = unwrap<Record<string, unknown>>(res.body) ?? {};
     this.cache.set(key, data);
     return { data, ageSec: 0 };
@@ -362,11 +389,11 @@ export class FleetClient {
    * (energy commands are not signed by the vehicle proxy). Billed; never retried.
    */
   /** Returns the raw response body (not unwrapped); the caller decides success. */
-  async energyCommand(siteId: string, path: string, body: Record<string, unknown>): Promise<unknown> {
+  async energyCommand(siteId: string, path: string, body: Record<string, unknown>, deadline?: number): Promise<unknown> {
     this.limiter.take("command", `site:${siteId}`);
-    const base = await this.resolveBaseUrl();
+    const base = await this.resolveBaseUrl(deadline);
     try {
-      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, ENERGY_COMMAND_TIMEOUT_MS);
+      const res = await this.call("command", "POST", `${base}/api/1/energy_sites/${encodeURIComponent(siteId)}/${path}`, body, undefined, ENERGY_COMMAND_TIMEOUT_MS, deadline);
       return res.body;
     } finally {
       // Always, even when the POST throws (5xx, timeout, dropped connection): the outcome may be
@@ -386,9 +413,9 @@ export class FleetClient {
    * GET /energy_sites/{id}/site_info (cached 10 min; fresh=true skips the cache, for send-time checks).
    * timeoutMs bounds this one request (default: the HTTP layer's 15 s).
    */
-  energySiteInfo(siteId: string, fresh = false, timeoutMs?: number) {
+  energySiteInfo(siteId: string, fresh = false, timeoutMs?: number, deadline?: number) {
     if (fresh) this.cache.delete(`energy_info:${siteId}`);
-    return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info", timeoutMs);
+    return this.energyGet(`energy_info:${siteId}`, ENERGY_INFO_TTL_MS, siteId, "site_info", timeoutMs, deadline);
   }
 
   /** GET /energy_sites/{id}/calendar_history with an already-validated, bounded query (cached 5 min). */

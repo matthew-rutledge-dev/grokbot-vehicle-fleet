@@ -8,6 +8,9 @@ import { mapFleetError } from "./errors.js";
 import type { UsageCategory, UsageTracker } from "./usage.js";
 import { USER_AGENT } from "./version.js";
 
+/** Default AbortSignal timeout when a caller does not pass timeoutMs. */
+export const HTTP_DEFAULT_TIMEOUT_MS = 15_000;
+
 export type FetchLike = (url: string, init: Record<string, unknown>) => Promise<{
   status: number;
   headers: Headers;
@@ -70,13 +73,15 @@ export class Http {
     }
     if (opts.token && !opts.external) headers.Authorization = `Bearer ${opts.token}`;
     let res: Awaited<ReturnType<FetchLike>>;
+    const timeoutMs = opts.timeoutMs ?? HTTP_DEFAULT_TIMEOUT_MS;
     try {
       res = await this.fetchImpl(opts.url, {
         method: opts.method,
         headers,
         body,
         dispatcher: opts.dispatcher,
-        signal: AbortSignal.timeout(opts.timeoutMs ?? 15_000),
+        signal: AbortSignal.timeout(timeoutMs),
+        timeoutMs, // so tests can honour the same cap as AbortSignal.timeout
       });
     } catch (e) {
       if (!opts.external) await this.usage?.record(category, undefined);

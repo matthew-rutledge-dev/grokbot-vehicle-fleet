@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.4
+
+Fix for the off-grid reserve time budget. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- `set_off_grid_vehicle_charging_reserve`: the 55 s budget now covers token refresh and the one 401 retry, not only the site lookup, pre-read, send and read-back HTTP timeouts. Those extra steps used to sit outside the cap (a refresh uses the default 15 s HTTP timeout, and a 401 retry starts a second refresh plus a second full request timeout), so a confirmed call could run past a 60 s MCP client timeout. Each of those steps is now capped to the time left; if a refresh leaves no room to start the send, nothing is sent (`budget_exhausted`); if a 401 leaves no time for a retry, the original 401 is returned and the request is not repeated. Read-back still stops early with `pending` / `readBackReason: "time_budget"` when the budget is spent. Never resent.
+
 ## 0.7.3
 
 Review follow-ups from 0.7.2. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
