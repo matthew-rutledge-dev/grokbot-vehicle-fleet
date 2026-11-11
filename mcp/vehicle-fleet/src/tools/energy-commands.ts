@@ -5,7 +5,7 @@
  * off, confirm=true + user_request, TESLA_FLEET_DRY_RUN honoured, no retries.
  * Scope: energy_cmds.
  */
-import { FleetApiError, LocalRefusal } from "../errors.js";
+import { DeadlineExceeded, FleetApiError, LocalRefusal } from "../errors.js";
 import { ENERGY_COMMAND_TIMEOUT_MS } from "../fleet.js";
 import type { ToolArgs, ToolContext } from "../context.js";
 import { bad, bool, classifySendFailure, int, requireIntent, scopeHint } from "./commands.js";
@@ -66,14 +66,17 @@ export const OFF_GRID_RESERVE_MAX = 95;
  *   returned and nothing is sent.
  * - the read is capped at OFF_GRID_PRECHECK_TIMEOUT_MS and leaves room for the send; with no room
  *   for it at all it is skipped (precheck "unavailable", precheckReason "time_budget").
+ * - the same overall deadline is passed through the read, so a token refresh or 401 retry
+ *   during it cannot run past the budget.
  */
 async function offGridPrecheck(siteId: string, body: Record<string, unknown>, ctx: ToolContext, deadline: number) {
   let data: Record<string, unknown>;
   const timeoutMs = Math.min(OFF_GRID_PRECHECK_TIMEOUT_MS, deadline - ENERGY_COMMAND_TIMEOUT_MS - ctx.fleet.clock());
   if (timeoutMs < OFF_GRID_MIN_READ_MS) return { note: { precheck: "unavailable", precheckReason: "time_budget" } };
   try {
-    data = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs)).data;
+    data = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs, deadline)).data;
   } catch (e) {
+    if (e instanceof DeadlineExceeded) return { note: { precheck: "unavailable", precheckReason: "time_budget" } };
     const code = e instanceof LocalRefusal ? e.code : e instanceof FleetApiError ? e.info.code : undefined;
     if (code === "login_required" || code === "no_refresh_token") throw e;
     return { note: { precheck: "unavailable", precheckReason: "read_failed" } };
@@ -103,8 +106,11 @@ export const OFF_GRID_READBACK_DELAY_MS = 5_000;
  * - each read-back read is capped at OFF_GRID_READBACK_TIMEOUT_MS, and a read-back read (with its
  *   pause) only starts if it fits in what is left; otherwise the read-back stops and reports
  *   "pending" (accepted, not yet confirmed). Never resent.
- * Worst case: 15 s site lookup + 10 s pre-read + 30 s send = 55 s, and the read-back only uses
- * what is left of the 55 s.
+ * - token refresh and the one 401 retry on any of those calls share the same deadline, so they
+ *   cannot push the tool past the 60 s client timeout. If a refresh leaves no room to start the
+ *   send, nothing is sent (budget_exhausted). A 401 retry is skipped when no time remains.
+ * Worst case without a refresh: 15 s site lookup + 10 s pre-read + 30 s send = 55 s, and the
+ * read-back only uses what is left of the 55 s.
  */
 export const OFF_GRID_TOTAL_BUDGET_MS = 55_000;
 export const OFF_GRID_PRECHECK_TIMEOUT_MS = 10_000;
@@ -148,7 +154,7 @@ async function offGridReadBack(siteId: string, body: Record<string, unknown>, ct
     reads++;
     let raw: unknown;
     try {
-      raw = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs)).data[OFF_GRID_RESERVE_FIELD];
+      raw = (await ctx.fleet.energySiteInfo(siteId, true, timeoutMs, deadline)).data[OFF_GRID_RESERVE_FIELD];
     } catch {
       unusable++;
       continue;
@@ -194,7 +200,7 @@ const SPECS: EnergySpec[] = [
   },
   {
     name: "set_off_grid_vehicle_charging_reserve", path: "off_grid_vehicle_charging_reserve",
-    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop). After Tesla accepts, re-reads site_info up to 3 times over about 15 s and reports readBack: confirmed, pending (accepted but the site still shows the old value; the Powerwall can report it late, or the 55 s time limit ran out: readBackReason time_budget), mismatch, or unavailable. Never resends.",
+    description: "Set the Powerwall off-grid vehicle charging reserve percent (whole number 10-95, the range in Tesla's installer docs; Tesla rejects others, e.g. 96): the share of Powerwall charge kept back from vehicle charging during a grid outage. Before sending, one fresh site_info read: refused (not_supported) when the site reports the feature unsupported; nothing is sent when the site already reports this value (noop). After Tesla accepts, re-reads site_info up to 3 times over about 15 s and reports readBack: confirmed, pending (accepted but the site still shows the old value; the Powerwall can report it late, or the 55 s time limit ran out, including time spent on a token refresh or 401 retry: readBackReason time_budget), mismatch, or unavailable. Never resends.",
     properties: { [OFF_GRID_RESERVE_FIELD]: { type: "integer", minimum: OFF_GRID_RESERVE_MIN, maximum: OFF_GRID_RESERVE_MAX } },
     required: [OFF_GRID_RESERVE_FIELD],
     build: (a) => ({ [OFF_GRID_RESERVE_FIELD]: int(a[OFF_GRID_RESERVE_FIELD], OFF_GRID_RESERVE_FIELD, OFF_GRID_RESERVE_MIN, OFF_GRID_RESERVE_MAX) }),
@@ -331,18 +337,18 @@ function energyTool(spec: EnergySpec): ToolDef {
         };
       }
       const deadline = ctx.fleet.clock() + (spec.budgetMs ?? Number.POSITIVE_INFINITY);
-      const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id);
-      let note: Record<string, unknown> = {};
-      if (spec.precheck) {
-        const pre = await spec.precheck(siteId, body, ctx, deadline);
-        if (pre.skip) return { command: spec.name, ...pre.skip };
-        note = pre.note ?? {};
-      }
-      if (deadline - ctx.fleet.clock() < ENERGY_COMMAND_TIMEOUT_MS) {
-        throw new LocalRefusal("budget_exhausted", `Nothing was sent: the steps before the send took too long to leave room for it inside the tool time limit (${Math.round((spec.budgetMs ?? 0) / 1000)} s). Try again.`);
-      }
       try {
-        const raw = await ctx.fleet.energyCommand(siteId, spec.path, body);
+        const siteId = await ctx.fleet.resolveSiteId(args.energy_site_id, deadline);
+        let note: Record<string, unknown> = {};
+        if (spec.precheck) {
+          const pre = await spec.precheck(siteId, body, ctx, deadline);
+          if (pre.skip) return { command: spec.name, ...pre.skip };
+          note = pre.note ?? {};
+        }
+        if (deadline - ctx.fleet.clock() < ENERGY_COMMAND_TIMEOUT_MS) {
+          throw new LocalRefusal("budget_exhausted", `Nothing was sent: the steps before the send took too long to leave room for it inside the tool time limit (${Math.round((spec.budgetMs ?? 0) / 1000)} s). Try again.`);
+        }
+        const raw = await ctx.fleet.energyCommand(siteId, spec.path, body, deadline);
         const outcome = interpretEnergyResponse(raw);
         const rawShape = rawShapeOf(raw);
         if (outcome.ok) {
@@ -351,6 +357,9 @@ function energyTool(spec: EnergySpec): ToolDef {
         }
         return { ok: false, command: spec.name, ...note, ...outcome.failure, rawShape, hint: "Read the current value with get_energy_site_info before doing anything else; it was not retried." };
       } catch (e) {
+        if (e instanceof DeadlineExceeded) {
+          throw new LocalRefusal("budget_exhausted", `Nothing was sent: the steps before the send took too long to leave room for it inside the tool time limit (${Math.round((spec.budgetMs ?? 0) / 1000)} s). Try again.`);
+        }
         if (e instanceof FleetApiError && e.info.status === 403) {
           throw new FleetApiError({ ...e.info, code: e.info.code === "missing_scope" ? "missing_energy_cmds_scope" : e.info.code, hint: e.info.code === "missing_scope" ? scopeHint(ENERGY_CMD_SCOPE) : e.info.hint });
         }

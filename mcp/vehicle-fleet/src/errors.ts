@@ -33,6 +33,18 @@ export class LocalRefusal extends Error {
   }
 }
 
+/**
+ * The overall deadline was reached before an HTTP request started (for example a
+ * token refresh used the time left, or a 401 retry would have run past it).
+ * The request was not sent.
+ */
+export class DeadlineExceeded extends Error {
+  constructor(message = "The time limit ran out before the request was sent.") {
+    super(message);
+    this.name = "DeadlineExceeded";
+  }
+}
+
 function parseRetryAfter(headers: Headers | undefined): number | undefined {
   if (!headers) return undefined;
   for (const h of ["retry-after", "ratelimit-reset"]) {

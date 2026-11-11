@@ -39,18 +39,20 @@ export class TokenManager {
     private readonly exporter: AccessTokenExporter = new AccessTokenExporter(config.accessTokenExportPath, undefined, config.tokenStorePath),
   ) {}
 
-  async getAccessToken(): Promise<string> {
+  async getAccessToken(opts?: { timeoutMs?: number }): Promise<string> {
     if (this.access && this.now() < this.access.exp - REFRESH_BUFFER_MS) return this.access.token;
-    return this.forceRefresh();
+    return this.forceRefresh(opts);
   }
 
   /**
    * Refresh now, sharing any refresh already in flight (single-flight; the store lock and
    * the auth rate limiter apply as for every refresh). Used by the export keep-fresh loop.
+   * `timeoutMs` bounds only a refresh started by this call; an already in-flight refresh keeps
+   * the timeout it was started with.
    */
-  forceRefresh(): Promise<string> {
+  forceRefresh(opts?: { timeoutMs?: number }): Promise<string> {
     if (!this.refreshing) {
-      this.refreshing = this.refresh().finally(() => {
+      this.refreshing = this.refresh(opts?.timeoutMs).finally(() => {
         this.refreshing = undefined;
       });
     }
@@ -136,7 +138,7 @@ export class TokenManager {
     };
   }
 
-  private async refresh(): Promise<string> {
+  private async refresh(timeoutMs?: number): Promise<string> {
     const clientId = this.config.clientId;
     if (!clientId) throw new LocalRefusal("not_configured", "TESLA_CLIENT_ID (or its alias TESLA_FLEET_CLIENT_ID) is not set.", "Set the plugin variable TESLA_CLIENT_ID, or export TESLA_FLEET_CLIENT_ID from your env loader (the auth helper also accepts TESLA_FLEET_CLIENT_SECRET for TESLA_CLIENT_SECRET).");
 
@@ -173,6 +175,7 @@ export class TokenManager {
             method: "POST",
             url: `${this.config.authBaseUrl}/oauth2/v3/token`,
             form: { grant_type: "refresh_token", client_id: clientId, refresh_token: used },
+            timeoutMs,
           },
           "auth", // authentication endpoints are not billed; counted for info only
         );
