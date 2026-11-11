@@ -195,7 +195,7 @@ export class AccessTokenExporter {
 export interface RefreshSource {
   /** Refresh now through the manager's single-flight + store lock + auth rate limiter. */
   forceRefresh(): Promise<string>;
-  /** Expiry (ms epoch) of the in-memory access token, if any. */
+  /** Expiry of the in-memory access token, in the same units as the clock passed to KeepFresh. */
   accessExpiresAt(): number | undefined;
   /** A refresh token is available (store or unseen seed) and re-consent is not pending. */
   canRefresh(): boolean;

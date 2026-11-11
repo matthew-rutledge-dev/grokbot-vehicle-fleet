@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { test } from "node:test";
 import { TokenManager } from "../src/auth.js";
 import { loadConfig } from "../src/config.js";
+import { DeadlineExceeded } from "../src/errors.js";
 import { Http } from "../src/http.js";
 import { RateLimiter } from "../src/ratelimit.js";
 import { sha256, TokenStore } from "../src/tokenstore.js";
@@ -85,4 +87,39 @@ test("no refresh token -> local refusal, no network", async () => {
   const { tm, calls } = mk(env);
   await assert.rejects(tm.getAccessToken(), /No refresh token/);
   assert.equal(calls.length, 0);
+});
+
+test("joining an in-flight refresh is capped to the caller's timeout", async () => {
+  let started!: () => void;
+  const began = new Promise<void>((r) => { started = r; });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const { tm, calls } = mk(baseEnv(), {
+    [`POST ${AUTH}/oauth2/v3/token`]: async () => {
+      started();
+      await gate;
+      return { status: 200, body: { access_token: "access-EXAMPLE-1", refresh_token: "rotated-EXAMPLE-1", expires_in: 28800 } };
+    },
+  });
+  const first = tm.getAccessToken();
+  await began;
+  await assert.rejects(tm.getAccessToken({ timeoutMs: 30 }), (e) => e instanceof DeadlineExceeded);
+  release();
+  assert.equal(await first, "access-EXAMPLE-1");
+  assert.equal(calls.length, 1, "the in-flight refresh was not cancelled or repeated");
+});
+
+test("store lock wait is capped to the caller's timeout", async () => {
+  const { tm, store } = mk(baseEnv());
+  const lock = `${store.filePath}.lock`;
+  fs.mkdirSync(path.dirname(store.filePath), { recursive: true });
+  const fd = fs.openSync(lock, "wx", 0o600);
+  try {
+    const t0 = Date.now();
+    await assert.rejects(tm.getAccessToken({ timeoutMs: 80 }), (e) => e instanceof DeadlineExceeded);
+    assert.ok(Date.now() - t0 < 2_000, "must not wait the default 10 s lock timeout");
+  } finally {
+    fs.closeSync(fd);
+    fs.rmSync(lock, { force: true });
+  }
 });

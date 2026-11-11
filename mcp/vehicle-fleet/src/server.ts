@@ -39,11 +39,14 @@ export type ServerDeps = {
 export function buildContext(deps: ServerDeps = {}): ToolContext {
   const env = deps.env ?? process.env;
   const config = deps.config ?? loadConfig(env);
+  // One clock for the process: TokenManager (refresh caps, token expiry) and
+  // FleetClient (deadlines) must agree. Tests inject it via fleetOptions.now or now.
+  const clock = deps.fleetOptions?.now ?? deps.now ?? (() => performance.now());
   const usage = new UsageTracker(usagePathFor(config.tokenStorePath), deps.now);
   const http = new Http(deps.fetchImpl, usage);
   const limiter = new RateLimiter();
-  const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter);
-  const fleet = new FleetClient(config, http, tokens, limiter, deps.fleetOptions);
+  const tokens = new TokenManager(config, new TokenStore(config.tokenStorePath), http, limiter, clock);
+  const fleet = new FleetClient(config, http, tokens, limiter, { ...deps.fleetOptions, now: clock });
   return { config, fleet, tokens, env, usage, audit: new AuditLog(config.auditLogPath, deps.now) };
 }
 
@@ -53,7 +56,7 @@ export function buildContext(deps: ServerDeps = {}): ToolContext {
  */
 export function startTokenKeepFresh(ctx: ToolContext, deps: { now?: () => number; scheduler?: Scheduler; warn?: (m: string) => void } = {}): KeepFresh | undefined {
   if (!ctx.tokens.exportEnabled) return undefined;
-  const k = new KeepFresh(ctx.tokens, deps.now, deps.scheduler, deps.warn);
+  const k = new KeepFresh(ctx.tokens, deps.now ?? (() => ctx.fleet.clock()), deps.scheduler, deps.warn);
   void k.start();
   return k;
 }

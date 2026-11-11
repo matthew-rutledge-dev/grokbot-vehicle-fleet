@@ -73,7 +73,7 @@ export class Http {
     }
     if (opts.token && !opts.external) headers.Authorization = `Bearer ${opts.token}`;
     let res: Awaited<ReturnType<FetchLike>>;
-    const timeoutMs = opts.timeoutMs ?? HTTP_DEFAULT_TIMEOUT_MS;
+    const timeoutMs = Math.floor(opts.timeoutMs ?? HTTP_DEFAULT_TIMEOUT_MS);
     try {
       res = await this.fetchImpl(opts.url, {
         method: opts.method,
