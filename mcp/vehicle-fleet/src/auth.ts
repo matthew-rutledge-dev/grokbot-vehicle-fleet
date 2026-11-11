@@ -35,7 +35,7 @@ export class TokenManager {
     private readonly store: TokenStore,
     private readonly http: Http,
     private readonly limiter: RateLimiter,
-    private readonly now: () => number = Date.now,
+    private readonly now: () => number = () => performance.now(),
     private readonly exporter: AccessTokenExporter = new AccessTokenExporter(config.accessTokenExportPath, undefined, config.tokenStorePath),
   ) {}
 
@@ -64,13 +64,14 @@ export class TokenManager {
   /** Wait for an in-flight refresh, optionally bounded by this caller's timeout. */
   private async waitForRefresh(pending: Promise<string>, timeoutMs?: number): Promise<string> {
     if (timeoutMs === undefined) return pending;
-    if (timeoutMs <= 0) throw new DeadlineExceeded();
+    const waitMs = Math.floor(timeoutMs);
+    if (waitMs <= 0) throw new DeadlineExceeded();
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         pending,
         new Promise<string>((_, reject) => {
-          timer = setTimeout(() => reject(new DeadlineExceeded()), timeoutMs);
+          timer = setTimeout(() => reject(new DeadlineExceeded()), waitMs);
         }),
       ]);
     } finally {
@@ -78,7 +79,7 @@ export class TokenManager {
     }
   }
 
-  /** Expiry (ms epoch) of the in-memory access token, if any. */
+  /** Expiry of the in-memory access token, in the same units as the injected clock. */
   accessExpiresAt(): number | undefined {
     return this.access?.exp;
   }
@@ -162,13 +163,10 @@ export class TokenManager {
     if (!clientId) throw new LocalRefusal("not_configured", "TESLA_CLIENT_ID (or its alias TESLA_FLEET_CLIENT_ID) is not set.", "Set the plugin variable TESLA_CLIENT_ID, or export TESLA_FLEET_CLIENT_ID from your env loader (the auth helper also accepts TESLA_FLEET_CLIENT_SECRET for TESLA_CLIENT_SECRET).");
 
     const started = this.now();
-    // Sub-20 ms "waits" are treated as zero so a caller-capped duration is not
-    // shrunk by clock noise (exact remaining-time tests use a separate fake clock).
-    const remaining = (): number | undefined => {
-      if (timeoutMs === undefined) return undefined;
-      const waited = Math.max(0, this.now() - started);
-      return Math.max(0, timeoutMs - (waited < 20 ? 0 : waited));
-    };
+    // Elapsed time uses the same injected clock as FleetClient deadlines, so a
+    // caller-capped duration is not shrunk by wall-clock wait.
+    const remaining = (): number | undefined =>
+      timeoutMs === undefined ? undefined : Math.max(0, Math.floor(timeoutMs - Math.max(0, this.now() - started)));
 
     try {
       return await this.store.withLock(async () => {
@@ -226,7 +224,7 @@ export class TokenManager {
       this.store.write({
         ...data,
         refresh_token: next,
-        refresh_issued_at: new Date(this.now()).toISOString(),
+        refresh_issued_at: new Date().toISOString(),
         seen_seed_sha256: trim(seen),
         needs_reauth: false,
       });

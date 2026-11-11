@@ -60,6 +60,7 @@ function slowWorld(opts: {
   };
   const ctx = buildContext({
     env: baseEnv(opts.env ?? EON), fetchImpl: impl,
+    // The same injected clock is used by FleetClient and TokenManager.
     fleetOptions: { sleep: async (ms) => { now += ms; }, now: () => now },
   });
   return { ctx, calls: f.calls, elapsed: () => now - start };

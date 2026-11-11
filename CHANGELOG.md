@@ -4,7 +4,7 @@
 
 Review follow-ups from 0.7.4. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
 
-- Off-grid deadline clock: the 55 s budget is computed and checked with `FleetClient.clock()`, which defaults to a monotonic clock (`performance.now`) instead of `Date.now`. Tests can still inject `now`.
+- Off-grid deadline clock: the 55 s budget is computed and checked with `FleetClient.clock()`, which defaults to a monotonic clock (`performance.now`) instead of `Date.now`. `TokenManager` uses the same clock (refresh caps and in-memory expiry), so a wall-clock wait cannot shrink a budget that a test or injected clock is counting separately. Tests inject it via `fleetOptions.now` or `now`. Stored `refresh_issued_at` is still a wall-clock ISO timestamp. Timeouts passed to `AbortSignal.timeout` are floored to integers, because a monotonic clock is fractional.
 - An already in-flight token refresh is now capped to this caller's timeout; the in-flight refresh itself is not cancelled. The token-store lock wait is also capped to that same timeout, and any time left after the lock is acquired is what the refresh HTTP request may use.
 - Other `call()` paths (vehicle list and state, live and cached vehicle data, ownership reads, energy live/history reads, wake, vehicle commands, and signed commands) accept an optional `deadline` and pass it through. Existing callers that omit it are unchanged.
 - Tests: a confirmed off-grid reserve call whose token refresh uses up the budget returns `budget_exhausted` and sends no command POST.

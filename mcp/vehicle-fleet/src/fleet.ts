@@ -116,8 +116,9 @@ export class FleetClient {
   private capTimeout(deadline: number | undefined, want: number): number {
     if (deadline === undefined) return want;
     const left = deadline - this.now();
-    if (left <= 0) throw new DeadlineExceeded();
-    return Math.min(want, left);
+    // AbortSignal.timeout requires an integer; a monotonic clock is fractional.
+    if (left < 1) throw new DeadlineExceeded();
+    return Math.min(want, Math.floor(left));
   }
 
   /**
