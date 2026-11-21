@@ -21,6 +21,12 @@ Development only: `typescript` (Apache-2.0), `tsx` (MIT), `@types/node` (MIT). T
 
 The 0.6.0 command bodies (media, HomeLink, window control, climate keeper, auto seat climate, cabin overheat temperature, valet) follow the request parameters read by `pkg/proxy/command.go` in `teslamotors/vehicle-command` and the enums in its `car_server.proto` / `vehicle.proto` (Apache-2.0). No code is copied; only parameter names and enum values are used. Read field names follow the `vehicle_data_equivalent` column of Tesla's Fleet Telemetry field list on developer.tesla.com.
 
+## Home Assistant integration (`custom_components/vehicle_fleet`)
+
+No third-party Python packages are bundled or required; it runs on Home Assistant's own libraries.
+
+Entity keys, translation keys and names, device classes and native units, and the small `flatten` helper that turns nested Fleet API fields into `section_field` keys follow Home Assistant core's `tesla_fleet` integration (`homeassistant/components/tesla_fleet`, Copyright Home Assistant contributors, Apache License 2.0), so entity ids can match. The rest is written for this repository. Test fixtures use Home Assistant's test helpers through `pytest-homeassistant-custom-component` (MIT, development only).
+
 ## Prior art (ideas only, no code copied)
 
 - `pjordan/tesla-fleet-mcp` (MIT)

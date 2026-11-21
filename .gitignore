@@ -8,3 +8,6 @@ tokens*.json
 auth-state.json
 *.pem
 usage*.json
+__pycache__/
+.pytest_cache/
+*.pyc

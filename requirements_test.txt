@@ -1,0 +1,2 @@
+# Home Assistant custom integration tests (custom_components/vehicle_fleet).
+pytest-homeassistant-custom-component

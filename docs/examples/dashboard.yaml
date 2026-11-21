@@ -1,0 +1,48 @@
+# Example dashboard for the vehicle_fleet integration.
+# Placeholder entity ids: replace "example_car" with your car's device name.
+# Command entities (lock, button) exist only when commands are enabled in the
+# integration options. Every command tile asks for confirmation; do not move
+# these actions into automations.
+type: sections
+title: Vehicle
+sections:
+  - type: grid
+    cards:
+      - type: tile
+        entity: sensor.example_car_battery_level
+      - type: tile
+        entity: sensor.example_car_battery_range
+      - type: tile
+        entity: sensor.example_car_charging
+      - type: tile
+        entity: sensor.example_car_vehicle_state
+      - type: tile
+        entity: sensor.example_car_data_age
+      - type: tile
+        entity: binary_sensor.example_car_charge_cable
+  - type: grid
+    cards:
+      - type: tile
+        entity: lock.example_car_lock
+        tap_action:
+          action: toggle
+          confirmation:
+            text: Lock or unlock the car?
+      - type: tile
+        entity: button.example_car_wake
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.example_car_wake
+          confirmation:
+            text: Wake the car? This is billed as a wake.
+      - type: tile
+        entity: button.example_car_homelink
+        tap_action:
+          action: perform-action
+          perform_action: button.press
+          target:
+            entity_id: button.example_car_homelink
+          confirmation:
+            text: Open/close the garage door via the car?

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+
+First version of the Home Assistant custom integration. The MCP server is unchanged apart from the version number (tool counts unchanged: 26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- New `custom_components/vehicle_fleet/` ("Grok Bot Vehicle Fleet", domain `vehicle_fleet`, `iot_class` `cloud_polling`) and a root `hacs.json`. Python, no shared runtime code with `mcp/vehicle-fleet/`; no third-party Python requirements.
+- Sign-in: OAuth2 through Home Assistant's Application credentials (your own client ID and secret), with token refresh by Home Assistant's `OAuth2Session`. Reauth on a rejected token. Region: auto-detect via `/api/1/users/region` (North America, then Europe; the answer is used only if it is a Fleet API host) or pick North America, Europe or China.
+- Polling never wakes the car and makes no billed data read while it sleeps: each poll reads the vehicle summary first and calls `vehicle_data` only when the state is `online`. Asleep or offline: last values are kept (and saved across restarts) and a data-age sensor shows their age. Interval 15 minutes by default, 5 minimum. A 429 keeps the last values and honors `Retry-After`. The documented cost figures are estimates.
+- Entities: sensors (battery level and range, charging state, charge limit, charger power, inside and outside temperature, odometer, tire pressures, vehicle state, data age), binary sensors (status, charge cable, Sentry, doors, frunk, trunk, windows) and a location tracker (on by default; opt out in the options). Keys, translation keys and native units mirror HA core's `tesla_fleet`.
+- Read-only by default and fails closed: lock, climate, switch (Sentry, charging) and button (Wake, flash, honk, HomeLink) entities exist only after commands are enabled in the options with a command proxy URL; the API client also refuses commands while read-only. Signed commands go only to the configured `tesla-http-proxy` (optional CA file); every command first checks the car is online and never wakes it. Wake is a button only. HomeLink makes one live read for the car's coordinates and the HomeLink-nearby flag before sending. No remote start, automations, blueprints or geofence actions.
+- Tests (`tests/ha/`, pytest-homeassistant-custom-component): config and options flow, token refresh and reauth, asleep/online gating (no `vehicle_data` call while asleep), location opt-out, rate limiting, read-only gating, and commands through a mocked proxy. CI runs them plus `hassfest` and HACS validation; the manifest version check now includes the integration's `manifest.json`.
+- Docs: README section, `docs/HOME-ASSISTANT.md`, `docs/HA-MIGRATION.md` and `docs/examples/dashboard.yaml` (placeholder entities only).
+
 ## 0.7.5
 
 Review follow-ups from 0.7.4. No new tools; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).

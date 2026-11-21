@@ -50,9 +50,44 @@ jobs:
         run: |
           node -e '
             const fs=require("fs");
-            const files=["plugin.json",".grok-plugin/plugin.json",".cursor-plugin/plugin.json",".mcp.json","mcp.json","mcp/vehicle-fleet/package.json"];
+            const files=["plugin.json",".grok-plugin/plugin.json",".cursor-plugin/plugin.json",".mcp.json","mcp.json","mcp/vehicle-fleet/package.json","custom_components/vehicle_fleet/manifest.json"];
             const v=new Set(files.map(f=>JSON.parse(fs.readFileSync(f,"utf8")).version).filter(Boolean));
             if(v.size!==1){console.error("version mismatch",[...v]);process.exit(1)}
             const src=fs.readFileSync("mcp/vehicle-fleet/src/version.ts","utf8");
             if(!src.includes(`"${[...v][0]}"`)){console.error("version.ts mismatch");process.exit(1)}
           '
+
+  ha-tests:
+    name: home assistant (pytest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - run: pip install -r requirements_test.txt
+      - run: python -m pytest
+
+  hassfest:
+    name: home assistant (hassfest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: home-assistant/actions/hassfest@2026.11.0
+
+  hacs:
+    name: home assistant (HACS validation)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: hacs/action@22.5.0
+        with:
+          category: integration
+          comment: "false"
+          # brands: no entry in home-assistant/brands yet; topics: repo topics are a settings change, not part of this PR.
+          ignore: brands topics
