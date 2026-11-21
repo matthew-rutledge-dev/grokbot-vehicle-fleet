@@ -1,0 +1,241 @@
+{
+  "application_credentials": {
+    "description": "Enter the client ID and client secret of your own Fleet API application from {developer_url}. Its allowed redirect URIs must include {redirect_url}."
+  },
+  "config": {
+    "step": {
+      "pick_implementation": {
+        "title": "[%key:common::config_flow::title::oauth2_pick_implementation%]"
+      },
+      "region": {
+        "title": "Fleet API region",
+        "description": "Pick the region of your account, or Auto to detect it.",
+        "data": {
+          "region": "Region"
+        }
+      },
+      "reauth_confirm": {
+        "title": "[%key:common::config_flow::title::reauth%]",
+        "description": "The Vehicle Fleet integration needs you to sign in again."
+      }
+    },
+    "error": {
+      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_account%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]",
+      "reauth_account_mismatch": "Signed in with a different account than the one being re-authenticated.",
+      "invalid_token": "The token returned by the sign-in could not be read.",
+      "no_vehicles": "No vehicles were found on this account.",
+      "missing_configuration": "[%key:common::config_flow::abort::oauth2_missing_configuration%]",
+      "missing_credentials": "[%key:common::config_flow::abort::oauth2_missing_credentials%]",
+      "authorize_url_timeout": "[%key:common::config_flow::abort::oauth2_authorize_url_timeout%]",
+      "no_url_available": "[%key:common::config_flow::abort::oauth2_no_url_available%]",
+      "oauth_error": "[%key:common::config_flow::abort::oauth2_error%]",
+      "oauth_timeout": "[%key:common::config_flow::abort::oauth2_timeout%]",
+      "oauth_unauthorized": "[%key:common::config_flow::abort::oauth2_unauthorized%]",
+      "oauth_failed": "[%key:common::config_flow::abort::oauth2_failed%]",
+      "user_rejected_authorize": "[%key:common::config_flow::abort::oauth2_user_rejected_authorize%]"
+    },
+    "create_entry": {
+      "default": "[%key:common::config_flow::create_entry::authenticated%]"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Vehicle Fleet options",
+        "description": "Polling never wakes the car: each poll first reads the vehicle state, and reads vehicle data (billed) only while the car is already online. Commands are off by default (read-only).",
+        "data": {
+          "scan_interval_minutes": "Poll interval (minutes)",
+          "location": "Read location",
+          "commands_enabled": "Enable commands",
+          "proxy_url": "Command proxy URL",
+          "proxy_ca_cert": "Command proxy CA certificate path"
+        },
+        "data_description": {
+          "scan_interval_minutes": "Minimum 5. Each poll is one state read, plus one billed vehicle data read only when the car is online.",
+          "location": "Adds a location tracker. The car shows a location-sharing indicator when location is read.",
+          "commands_enabled": "Creates lock, climate, switch and button entities. Do not use them in automations.",
+          "proxy_url": "Base URL of your tesla-http-proxy (https; plain http only on localhost). Required for commands.",
+          "proxy_ca_cert": "Optional path to a CA certificate file that signed the proxy's TLS certificate."
+        }
+      }
+    },
+    "error": {
+      "invalid_url": "Enter a valid https URL without credentials, query or fragment.",
+      "http_not_loopback": "Plain http is only allowed for a proxy on this machine (localhost).",
+      "proxy_required": "A command proxy URL is required to enable commands.",
+      "ca_not_found": "The CA certificate file was not found."
+    }
+  },
+  "selector": {
+    "region": {
+      "options": {
+        "auto": "Auto-detect",
+        "na": "North America, Asia-Pacific",
+        "eu": "Europe, Middle East, Africa",
+        "cn": "China"
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "charge_state_charging_state": {
+        "name": "Charging",
+        "state": {
+          "starting": "Starting",
+          "charging": "Charging",
+          "stopped": "Stopped",
+          "complete": "Complete",
+          "disconnected": "Disconnected",
+          "no_power": "No power"
+        }
+      },
+      "charge_state_battery_level": {
+        "name": "Battery level"
+      },
+      "charge_state_battery_range": {
+        "name": "Battery range"
+      },
+      "charge_state_charge_limit_soc": {
+        "name": "Charge limit"
+      },
+      "charge_state_charger_power": {
+        "name": "Charger power"
+      },
+      "climate_state_inside_temp": {
+        "name": "Inside temperature"
+      },
+      "climate_state_outside_temp": {
+        "name": "Outside temperature"
+      },
+      "vehicle_state_odometer": {
+        "name": "Odometer"
+      },
+      "vehicle_state_tpms_pressure_fl": {
+        "name": "Tire pressure front left"
+      },
+      "vehicle_state_tpms_pressure_fr": {
+        "name": "Tire pressure front right"
+      },
+      "vehicle_state_tpms_pressure_rl": {
+        "name": "Tire pressure rear left"
+      },
+      "vehicle_state_tpms_pressure_rr": {
+        "name": "Tire pressure rear right"
+      },
+      "state": {
+        "name": "Vehicle state",
+        "state": {
+          "online": "Online",
+          "asleep": "Asleep",
+          "offline": "Offline"
+        }
+      },
+      "data_age": {
+        "name": "Data age"
+      }
+    },
+    "binary_sensor": {
+      "state": {
+        "name": "Status"
+      },
+      "charge_state_conn_charge_cable": {
+        "name": "Charge cable"
+      },
+      "vehicle_state_sentry_mode": {
+        "name": "Sentry mode"
+      },
+      "vehicle_state_df": {
+        "name": "Front driver door"
+      },
+      "vehicle_state_dr": {
+        "name": "Rear driver door"
+      },
+      "vehicle_state_pf": {
+        "name": "Front passenger door"
+      },
+      "vehicle_state_pr": {
+        "name": "Rear passenger door"
+      },
+      "vehicle_state_ft": {
+        "name": "Frunk"
+      },
+      "vehicle_state_rt": {
+        "name": "Trunk"
+      },
+      "vehicle_state_fd_window": {
+        "name": "Front driver window"
+      },
+      "vehicle_state_fp_window": {
+        "name": "Front passenger window"
+      },
+      "vehicle_state_rd_window": {
+        "name": "Rear driver window"
+      },
+      "vehicle_state_rp_window": {
+        "name": "Rear passenger window"
+      }
+    },
+    "device_tracker": {
+      "location": {
+        "name": "Location"
+      }
+    },
+    "lock": {
+      "vehicle_state_locked": {
+        "name": "[%key:component::lock::title%]"
+      }
+    },
+    "climate": {
+      "driver_temp": {
+        "name": "[%key:component::climate::title%]"
+      }
+    },
+    "switch": {
+      "vehicle_state_sentry_mode": {
+        "name": "Sentry mode"
+      },
+      "charge_state_charging_state": {
+        "name": "Charge"
+      }
+    },
+    "button": {
+      "wake": {
+        "name": "Wake"
+      },
+      "flash_lights": {
+        "name": "Flash lights"
+      },
+      "honk": {
+        "name": "Honk horn"
+      },
+      "homelink": {
+        "name": "Homelink"
+      }
+    }
+  },
+  "exceptions": {
+    "vehicle_not_online": {
+      "message": "The vehicle is {state}. Nothing was sent; press Wake first if you want to wake it."
+    },
+    "commands_disabled": {
+      "message": "Commands are off (read-only mode). Turn them on in the integration options."
+    },
+    "command_failed": {
+      "message": "{command} failed: {error}"
+    },
+    "missing_temperature": {
+      "message": "No temperature was given."
+    },
+    "homelink_not_nearby": {
+      "message": "The vehicle reports no HomeLink device nearby. Nothing was sent."
+    },
+    "homelink_no_location": {
+      "message": "No location is available for HomeLink. Nothing was sent."
+    }
+  }
+}

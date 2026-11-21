@@ -17,7 +17,18 @@ No secrets in this file.
 - Fleet Telemetry (separate project; needs a public server).
 - Marketplace submission (xAI plugin marketplace remote entry; Cursor) after the repo is public and a fresh-clone walk passes.
 
-## Planned: Home Assistant integration (same repo, after PR #1 merges)
+## Home Assistant integration
+
+First version shipped in 0.8.0 (`custom_components/vehicle_fleet/`, see `docs/HOME-ASSISTANT.md`). Its data-source rule overrides the plan below: the coordinator reads the vehicle summary first and calls `vehicle_data` only while the car is online (no `vehicle_data_cached` polling, no billed reads while asleep, never wakes); location follows the plugin (on, with an opt-out).
+
+Still to do for the integration:
+
+- Energy-site entities (battery %, solar, load, grid power, grid status): out of scope for v1; needs the energy read tools below, off by default, interval 5 min or more; prefer a local gateway integration where available.
+- Navigation (share a destination via the Fleet REST endpoint), charge limit / charge current number entities, seat heaters, windows, trunk/frunk covers.
+- Field-test with a real car (state gating, a command through the proxy, HomeLink) before any release; packaging review; brands entry; repository topics for HACS validation; Marketplace listing.
+- Decide whether to back off polling for older cars that stay awake while data is read (HA core has a pre-2021 back-off).
+
+### Original plan
 
 - **Where:** `custom_components/vehicle_fleet/` plus a root `hacs.json`. Python, separate from the Node MCP server in `mcp/vehicle-fleet/` (no shared runtime code).
 - **Distribution:** the Home Assistant Marketplace (built into HA core from 2026.11; uses the same `hacs.json` / catalog as HACS), and HACS on older HA versions. Adding it as a custom repository needs the repo to be public and the user's GitHub connection.

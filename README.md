@@ -28,6 +28,7 @@ It is **read-only by default**, reads **cached data first**, and **never wakes t
 | `scripts/bootstrap-mcp.sh` / `.ps1` | Required after clone: `npm ci --ignore-scripts` + `npm run build` |
 | `scripts/auth-helper.mjs` | Optional first-token helper |
 | `assets/logo.svg` | Logo (original artwork) |
+| `custom_components/vehicle_fleet/` + `hacs.json` | Home Assistant custom integration (Python, separate from the MCP server); tests in `tests/ha/` |
 
 ## Install
 
@@ -276,9 +277,21 @@ Event triggers (charge complete, plugged in or unplugged, door or trunk open whi
 
 When an alert needs an action, the agent comes back through this plugin's confirm-gated tools. Pushing a `fleet_telemetry_config` to a car is a one-time vehicle configuration change made by the operator (it is signed, like commands); this plugin does not do it. Without the bridge, the plugin works exactly as described here.
 
+## Home Assistant integration (first version, 0.8.0)
+
+`custom_components/vehicle_fleet/` is a Home Assistant custom integration ("Grok Bot Vehicle Fleet", domain `vehicle_fleet`), installable as a HACS custom repository. It signs in with your own Fleet API application through Home Assistant's Application credentials, and is **read-only by default**:
+
+- Each poll reads the vehicle summary first (never wakes the car) and makes the billed `vehicle_data` read only when the car is already online. Asleep or offline: no data read; sensors keep their last values and a data-age sensor shows when they were read. Default interval 15 minutes, minimum 5.
+- It never wakes the car on its own; the only wake is a Wake button you press.
+- Location is on by default, with an opt-out in the options.
+- Commands (lock, climate, Sentry, charging, flash, honk, HomeLink, Wake) exist only after you enable them in the options and set your `tesla-http-proxy` URL. No automations, blueprints or geofence actions are shipped; don't wire the command entities into automations.
+- Entity keys and units mirror HA core's `tesla_fleet` so entity ids can match; see the migration guide.
+
+Setup, cost estimate and entity list: [docs/HOME-ASSISTANT.md](docs/HOME-ASSISTANT.md). Migration: [docs/HA-MIGRATION.md](docs/HA-MIGRATION.md). Example dashboard: [docs/examples/dashboard.yaml](docs/examples/dashboard.yaml).
+
 ## Roadmap
 
-- Planned: a Home Assistant custom integration (`custom_components/vehicle_fleet/`, installable via the HA Marketplace or HACS) in this repo, after v0.1. See `BACKLOG.md`.
+- Home Assistant integration: energy-site entities, navigation, more command entities, and a Marketplace release. See `BACKLOG.md`.
 
 ## Development
 
@@ -290,6 +303,15 @@ npm test     # builds, then unit tests + MCP stdio smoke against local fakes (no
 ```
 
 CI runs the same on ubuntu-latest and windows-latest (Node 22.19.0, latest 22 and 24), with no secrets. Requires Node 22.19 or newer (undici 8 needs it).
+
+Home Assistant integration (Python 3.14):
+
+```bash
+pip install -r requirements_test.txt
+python -m pytest     # tests/ha: config flow, asleep/online gating, read-only gating, commands via a mocked proxy
+```
+
+CI also runs these tests, `hassfest` and HACS validation.
 
 ## Dependency policy
 
