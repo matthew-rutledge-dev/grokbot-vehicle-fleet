@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.1
+
+Review follow-ups for the Home Assistant integration from 0.8.0. The MCP server is unchanged apart from the version number (tool counts unchanged: 26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- No full VIN on displays: the device no longer sets a serial number (it showed the full VIN on the device page). The VIN stays only in the device identifier and entity unique_ids.
+- Commands fail closed on bad stored options: only a boolean `true` enables commands (a string such as `"false"` no longer does). The stored proxy URL is checked again at setup with the options-flow rules (https, or http on localhost only; no credentials, query or fragment); if it is missing or invalid, the integration runs read-only and logs a warning.
+- Poll interval: an unparsable stored value falls back to the 15-minute default and any value is clamped to 5-1440 minutes, instead of failing setup.
+- Token refresh errors: connection errors and timeouts (including Home Assistant's OAuth2 token request errors) during a refresh become a setup retry at setup and an update failure while polling, never a raw exception. A 4xx rejection (other than 429) still starts reauth; 429 and 5xx retry.
+- A token refresh (which updates the entry data) no longer reloads the entry; only option changes do. Previously each refresh repeated the setup reads.
+- Tests for each fix (65 Home Assistant tests in total).
+
 ## 0.8.0
 
 First version of the Home Assistant custom integration. The MCP server is unchanged apart from the version number (tool counts unchanged: 26 read-only, 67 with commands on, 71 with both opt-ins).

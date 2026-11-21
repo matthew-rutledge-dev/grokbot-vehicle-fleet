@@ -60,13 +60,13 @@ Note: some older cars (pre-2021 Model S/X) may not fall asleep while their data 
 |---|---|---|
 | Poll interval (minutes) | 15 | Minimum 5. |
 | Read location | on | Adds `device_tracker.<car>_location`. Turn off to drop `location_data` from reads and remove the tracker. The car shows a location-sharing indicator when location is read. |
-| Enable commands | **off** | Read-only until you turn this on. While off, no lock, climate, switch or button entities exist, and the API client refuses commands (fails closed). |
+| Enable commands | **off** | Read-only until you turn this on. While off, no lock, climate, switch or button entities exist, and the API client refuses commands (fails closed). If the stored proxy URL is missing or no longer valid at startup, the integration stays read-only and logs a warning. |
 | Command proxy URL | empty | Base URL of your `tesla-http-proxy`, for example `https://proxy.example.com`. https only; plain http only on localhost. Required to enable commands. |
 | Command proxy CA certificate path | empty | Optional CA file for a proxy with a private certificate. |
 
 ## Entities
 
-Device name = the car's display name; entity ids follow it (for example `sensor.example_car_battery_level`). Keys (`unique_id` = `{vin}-{key}`), translation keys and native units mirror HA core's `tesla_fleet`, so a fresh install produces the same entity ids where both have the entity.
+Device name = the car's display name (the full VIN is not shown on the device page); entity ids follow it (for example `sensor.example_car_battery_level`). Keys (`unique_id` = `{vin}-{key}`), translation keys and native units mirror HA core's `tesla_fleet`, so a fresh install produces the same entity ids where both have the entity.
 
 **Always (read-only):**
 
