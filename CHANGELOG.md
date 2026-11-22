@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+Naming only. No behavior changes; tool counts unchanged (26 read-only, 67 with commands on, 71 with both opt-ins).
+
+- The Home Assistant integration's display name is now "Vehicle Fleet" (`manifest.json`, `hacs.json`, docs). The domain stays `vehicle_fleet`, so existing config entries, entity ids and unique_ids are unchanged. The MCP plugin's own name is unchanged.
+
 ## 0.8.1
 
 Review follow-ups for the Home Assistant integration from 0.8.0. The MCP server is unchanged apart from the version number (tool counts unchanged: 26 read-only, 67 with commands on, 71 with both opt-ins).

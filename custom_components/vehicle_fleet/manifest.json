@@ -1,6 +1,6 @@
 {
   "domain": "vehicle_fleet",
-  "name": "Grok Bot Vehicle Fleet",
+  "name": "Vehicle Fleet",
   "codeowners": ["@matthew-rutledge-dev"],
   "config_flow": true,
   "dependencies": ["application_credentials"],
@@ -9,5 +9,5 @@
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/matthew-rutledge-dev/grokbot-vehicle-fleet/issues",
   "requirements": [],
-  "version": "0.8.1"
+  "version": "0.8.2"
 }

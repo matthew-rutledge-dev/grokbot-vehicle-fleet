@@ -1,4 +1,4 @@
-"""Constants for the Grok Bot Vehicle Fleet integration."""
+"""Constants for the Vehicle Fleet integration."""
 
 from __future__ import annotations
 

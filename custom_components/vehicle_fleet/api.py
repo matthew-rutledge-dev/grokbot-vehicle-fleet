@@ -1,4 +1,4 @@
-"""Minimal async Fleet API client for the Grok Bot Vehicle Fleet integration.
+"""Minimal async Fleet API client for the Vehicle Fleet integration.
 
 Reads go to the regional Fleet API. Signed vehicle commands go only to the
 user-configured command proxy (tesla-http-proxy). The wake call goes to the
