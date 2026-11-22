@@ -23,6 +23,28 @@ sections:
   - type: grid
     cards:
       - type: tile
+        entity: sensor.example_car_charge_energy_added
+      - type: tile
+        entity: sensor.example_car_charge_rate
+      - type: tile
+        entity: sensor.example_car_time_to_full_charge
+      - type: tile
+        entity: sensor.example_car_speed
+      - type: tile
+        entity: sensor.example_car_distance_to_arrival
+      - type: tile
+        entity: sensor.example_car_time_to_arrival
+      - type: tile
+        entity: binary_sensor.example_car_charge_port_door
+      - type: tile
+        entity: binary_sensor.example_car_dashcam
+      - type: tile
+        entity: binary_sensor.example_car_user_present
+      - type: tile
+        entity: update.example_car_update
+  - type: grid
+    cards:
+      - type: tile
         entity: lock.example_car_lock
         tap_action:
           action: toggle

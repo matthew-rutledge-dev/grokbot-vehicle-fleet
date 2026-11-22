@@ -41,3 +41,22 @@ PY
 ```
 
 Write changes only with Home Assistant stopped and a backup taken.
+
+## Entity ids added in 0.8.3
+
+These match HA core `tesla_fleet` keys, translation keys and native units, so with the same device name the new ids match the old ones (placeholder device `example_car`):
+
+| Old / new entity id | Key (`unique_id` = `{vin}-{key}`) |
+|---|---|
+| `sensor.example_car_charge_energy_added` | `charge_state_charge_energy_added` |
+| `sensor.example_car_charge_rate` | `charge_state_charge_rate` |
+| `sensor.example_car_time_to_full_charge` | `charge_state_minutes_to_full_charge` (timestamp: now + remaining minutes) |
+| `sensor.example_car_speed` | `drive_state_speed` (null is 0) |
+| `sensor.example_car_distance_to_arrival` | `drive_state_active_route_miles_to_arrival` |
+| `sensor.example_car_time_to_arrival` | `drive_state_active_route_minutes_to_arrival` (timestamp) |
+| `binary_sensor.example_car_charge_port_door` | `charge_state_charge_port_door_open` |
+| `binary_sensor.example_car_dashcam` | `vehicle_state_dashcam_state` (on when `Recording`) |
+| `binary_sensor.example_car_user_present` | `vehicle_state_is_user_present` |
+| `update.example_car_update` | `vehicle_state_software_update_status` (read-only; no install) |
+
+Ids the new integration still does not have (covers, numbers, seat heaters, keyless driving, boombox, cabin overheat, defrost and others) stay with `_legacy` or can be rewritten; frunk, trunk, windows, charge port door and charge-limit already exist here as binary sensors / a charge-limit sensor. The old charge-port entity was a cover; remapping it uses `binary_sensor.example_car_charge_port_door`.

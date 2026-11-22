@@ -1,4 +1,4 @@
-# Home Assistant integration: `vehicle_fleet` (0.8.0, first version)
+# Home Assistant integration: `vehicle_fleet` (0.8.3)
 
 A Home Assistant custom integration in `custom_components/vehicle_fleet/`. Display name: **Vehicle Fleet**. Works with Tesla vehicles through the official Fleet API, using your own developer application. It is a separate Python package and shares no runtime code with the Node MCP server in `mcp/vehicle-fleet/`; the two share only the version number.
 
@@ -70,9 +70,10 @@ Device name = the car's display name (the full VIN is not shown on the device pa
 
 **Always (read-only):**
 
-- Sensors: battery level, battery range, charging (state), charge limit, charger power, inside and outside temperature, odometer, four tire pressures, vehicle state (online/asleep/offline), data age.
-- Binary sensors: status (connectivity), charge cable, Sentry mode, four doors, frunk, trunk, four windows.
-- Device tracker: location (unless turned off).
+- Sensors: battery level, battery range, charging (state), charge limit, charger power, charge energy added, charge rate, time to full charge, speed, distance and time to arrival (unavailable when there is no route), inside and outside temperature, odometer, four tire pressures, vehicle state (online/asleep/offline), data age.
+- Binary sensors: status (connectivity), charge cable, Sentry mode, dashcam, user present, four doors, charge port door, frunk, trunk, four windows.
+- Update: software version (read-only; no install action).
+- Device tracker: location (unless turned off). Distance and time to arrival still work when location is off; they come from `drive_state`, not coordinates.
 
 **Only with commands enabled** (each checks the car is already online first and refuses otherwise; nothing wakes the car):
 
