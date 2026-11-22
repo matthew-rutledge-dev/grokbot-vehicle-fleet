@@ -137,6 +137,24 @@
       },
       "data_age": {
         "name": "Data age"
+      },
+      "charge_state_charge_energy_added": {
+        "name": "Charge energy added"
+      },
+      "charge_state_charge_rate": {
+        "name": "Charge rate"
+      },
+      "charge_state_minutes_to_full_charge": {
+        "name": "Time to full charge"
+      },
+      "drive_state_speed": {
+        "name": "Speed"
+      },
+      "drive_state_active_route_miles_to_arrival": {
+        "name": "Distance to arrival"
+      },
+      "drive_state_active_route_minutes_to_arrival": {
+        "name": "Time to arrival"
       }
     },
     "binary_sensor": {
@@ -178,6 +196,12 @@
       },
       "vehicle_state_rp_window": {
         "name": "Rear passenger window"
+      },
+      "vehicle_state_dashcam_state": {
+        "name": "Dashcam"
+      },
+      "vehicle_state_is_user_present": {
+        "name": "User present"
       }
     },
     "device_tracker": {
@@ -215,6 +239,11 @@
       },
       "homelink": {
         "name": "Homelink"
+      }
+    },
+    "update": {
+      "vehicle_state_software_update_status": {
+        "name": "[%key:component::update::title%]"
       }
     }
   },

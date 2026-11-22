@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -16,14 +16,18 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     PERCENTAGE,
     EntityCategory,
+    UnitOfEnergy,
     UnitOfLength,
     UnitOfPower,
     UnitOfPressure,
+    UnitOfSpeed,
     UnitOfTemperature,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.typing import StateType
+from homeassistant.util import dt as dt_util
+from homeassistant.util.variance import ignore_variance
 
 from . import VehicleFleetConfigEntry
 from .const import VEHICLE_STATES
@@ -46,6 +50,14 @@ class VehicleFleetSensorDescription(SensorEntityDescription):
     """Sensor description with a value transform."""
 
     value_fn: Callable[[Any], StateType] = lambda x: x
+    unavailable_if_none: bool = False
+
+
+@dataclass(frozen=True, kw_only=True)
+class VehicleFleetTimeDescription(SensorEntityDescription):
+    """A remaining-time field shown as a timestamp (now + minutes)."""
+
+    variance: int = 1
 
 
 def _tire(pos: str) -> VehicleFleetSensorDescription:
@@ -93,6 +105,20 @@ DESCRIPTIONS: tuple[VehicleFleetSensorDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
     ),
     VehicleFleetSensorDescription(
+        key="charge_state_charge_energy_added",
+        state_class=SensorStateClass.TOTAL,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        suggested_display_precision=1,
+    ),
+    VehicleFleetSensorDescription(
+        key="charge_state_charge_rate",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfSpeed.MILES_PER_HOUR,
+        device_class=SensorDeviceClass.SPEED,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
+    VehicleFleetSensorDescription(
         key="climate_state_inside_temp",
         state_class=SensorStateClass.MEASUREMENT,
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
@@ -105,6 +131,20 @@ DESCRIPTIONS: tuple[VehicleFleetSensorDescription, ...] = (
         native_unit_of_measurement=UnitOfTemperature.CELSIUS,
         device_class=SensorDeviceClass.TEMPERATURE,
         suggested_display_precision=1,
+    ),
+    VehicleFleetSensorDescription(
+        key="drive_state_speed",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfSpeed.MILES_PER_HOUR,
+        device_class=SensorDeviceClass.SPEED,
+        value_fn=lambda v: v or 0,
+    ),
+    VehicleFleetSensorDescription(
+        key="drive_state_active_route_miles_to_arrival",
+        state_class=SensorStateClass.MEASUREMENT,
+        native_unit_of_measurement=UnitOfLength.MILES,
+        device_class=SensorDeviceClass.DISTANCE,
+        unavailable_if_none=True,
     ),
     VehicleFleetSensorDescription(
         key="vehicle_state_odometer",
@@ -127,6 +167,20 @@ DESCRIPTIONS: tuple[VehicleFleetSensorDescription, ...] = (
     ),
 )
 
+TIME_DESCRIPTIONS: tuple[VehicleFleetTimeDescription, ...] = (
+    VehicleFleetTimeDescription(
+        key="charge_state_minutes_to_full_charge",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        variance=4,
+    ),
+    VehicleFleetTimeDescription(
+        key="drive_state_active_route_minutes_to_arrival",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        variance=1,
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -137,6 +191,7 @@ async def async_setup_entry(
     entities: list[SensorEntity] = []
     for vehicle in entry.runtime_data.vehicles:
         entities.extend(VehicleFleetSensor(vehicle, d) for d in DESCRIPTIONS)
+        entities.extend(VehicleFleetTimeSensor(vehicle, d) for d in TIME_DESCRIPTIONS)
         entities.append(VehicleFleetDataAgeSensor(vehicle))
     async_add_entities(entities)
 
@@ -152,10 +207,55 @@ class VehicleFleetSensor(VehicleFleetEntity, SensorEntity):
         self.entity_description = description
 
     @property
+    def available(self) -> bool:
+        """Hide route distance when there is no active route."""
+        if not super().available:
+            return False
+        if self.entity_description.unavailable_if_none and self._value is None:
+            return False
+        return True
+
+    @property
     def native_value(self) -> StateType:
-        """Return the (last known) value."""
+        """Return the (last known) value.
+
+        ``drive_state_speed`` is null while parked; the value function turns
+        that into 0, matching HA core tesla_fleet. Other sensors stay unknown
+        when the field is missing.
+        """
         value = self._value
-        return None if value is None else self.entity_description.value_fn(value)
+        if value is None and self.entity_description.key != "drive_state_speed":
+            return None
+        return self.entity_description.value_fn(value)
+
+
+class VehicleFleetTimeSensor(VehicleFleetEntity, SensorEntity):
+    """Remaining minutes, shown as a completion timestamp (same as HA core)."""
+
+    entity_description: VehicleFleetTimeDescription
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(self, vehicle, description: VehicleFleetTimeDescription) -> None:
+        """Initialize."""
+        super().__init__(vehicle, description.key)
+        self.entity_description = description
+        self._get_timestamp = ignore_variance(
+            func=lambda value: dt_util.now() + timedelta(minutes=value),
+            ignored_variance=timedelta(minutes=description.variance),
+        )
+
+    @property
+    def available(self) -> bool:
+        """Unavailable when there is no remaining time (no charge / no route)."""
+        value = self._value
+        return super().available and isinstance(value, int | float) and value > 0
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return now + remaining minutes, with small changes ignored."""
+        if not self.available:
+            return None
+        return self._get_timestamp(self._value)
 
 
 class VehicleFleetDataAgeSensor(VehicleFleetEntity, SensorEntity):

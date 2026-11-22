@@ -143,8 +143,16 @@ class VehicleFleetCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.async_set_updated_data({**(self.data or {}), key: value})
 
 
+# Arrival distance/time are useful without exposing coordinates, and they come
+# from drive_state (already fetched) rather than location_data.
+_ARRIVAL_KEYS = {
+    "drive_state_active_route_miles_to_arrival",
+    "drive_state_active_route_minutes_to_arrival",
+}
+
+
 def _is_location_key(key: str) -> bool:
-    return key in {
+    if key in {
         "drive_state_latitude",
         "drive_state_longitude",
         "drive_state_heading",
@@ -152,4 +160,6 @@ def _is_location_key(key: str) -> bool:
         "drive_state_native_longitude",
         "drive_state_corrected_latitude",
         "drive_state_corrected_longitude",
-    } or key.startswith("drive_state_active_route_")
+    }:
+        return True
+    return key.startswith("drive_state_active_route_") and key not in _ARRIVAL_KEYS

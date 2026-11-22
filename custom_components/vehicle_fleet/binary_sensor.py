@@ -63,6 +63,16 @@ DESCRIPTIONS: tuple[VehicleFleetBinaryDescription, ...] = (
     _open("vehicle_state_fp_window", BinarySensorDeviceClass.WINDOW),
     _open("vehicle_state_rd_window", BinarySensorDeviceClass.WINDOW),
     _open("vehicle_state_rp_window", BinarySensorDeviceClass.WINDOW),
+    VehicleFleetBinaryDescription(
+        key="vehicle_state_dashcam_state",
+        device_class=BinarySensorDeviceClass.RUNNING,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        is_on=lambda v: v == "Recording",
+    ),
+    VehicleFleetBinaryDescription(
+        key="vehicle_state_is_user_present",
+        device_class=BinarySensorDeviceClass.PRESENCE,
+    ),
 )
 
 
