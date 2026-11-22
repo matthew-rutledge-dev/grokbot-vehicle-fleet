@@ -29,6 +29,7 @@ DISTANCE = "sensor.example_car_distance_to_arrival"
 TIME_TO_ARRIVAL = "sensor.example_car_time_to_arrival"
 DASHCAM = "binary_sensor.example_car_dashcam"
 USER_PRESENT = "binary_sensor.example_car_user_present"
+CHARGE_PORT = "binary_sensor.example_car_charge_port_door"
 UPDATE = "update.example_car_update"
 
 
@@ -40,6 +41,7 @@ def _data(**overrides: object) -> dict:
             "charge_energy_added": 12.3,
             "charge_rate": 34.5,
             "minutes_to_full_charge": 90,
+            "charge_port_door_open": True,
         }
     )
     data["drive_state"].update(
@@ -106,6 +108,7 @@ async def test_new_entities_from_vehicle_data(
     assert _state_in(hass, DISTANCE, UnitOfLength.MILES) == 12.5
     assert hass.states.get(DASHCAM).state == "on"
     assert hass.states.get(USER_PRESENT).state == "on"
+    assert hass.states.get(CHARGE_PORT).state == "on"
 
     now = dt_util.now()
     assert dt_util.parse_datetime(hass.states.get(TIME_TO_FULL).state) == now + timedelta(
@@ -131,6 +134,7 @@ async def test_new_entities_from_vehicle_data(
     )
     assert _unique(hass, DASHCAM) == f"{VIN}-vehicle_state_dashcam_state"
     assert _unique(hass, USER_PRESENT) == f"{VIN}-vehicle_state_is_user_present"
+    assert _unique(hass, CHARGE_PORT) == f"{VIN}-charge_state_charge_port_door_open"
     assert _unique(hass, UPDATE) == f"{VIN}-vehicle_state_software_update_status"
 
 
@@ -150,6 +154,19 @@ async def test_speed_null_is_zero_and_dashcam_off(
     assert _state_in(hass, SPEED, UnitOfSpeed.MILES_PER_HOUR) == 0
     assert hass.states.get(DASHCAM).state == "off"
     assert hass.states.get(USER_PRESENT).state == "off"
+
+
+async def test_charge_port_door_closed(
+    hass: HomeAssistant, aioclient_mock: AiohttpClientMocker
+) -> None:
+    """Charge port door is off when closed (open is covered in the main setup test)."""
+    mock_fleet(
+        aioclient_mock, "online", _data(charge_state={"charge_port_door_open": False})
+    )
+    await setup_entry(hass, make_entry())
+    assert hass.states.get(CHARGE_PORT).state == "off"
+    assert _unique(hass, CHARGE_PORT) == f"{VIN}-charge_state_charge_port_door_open"
+    assert len(calls_to(aioclient_mock, "/vehicle_data")) == 1
 
 
 async def test_speed_value_when_moving(

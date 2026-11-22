@@ -71,7 +71,7 @@ Device name = the car's display name (the full VIN is not shown on the device pa
 **Always (read-only):**
 
 - Sensors: battery level, battery range, charging (state), charge limit, charger power, charge energy added, charge rate, time to full charge, speed, distance and time to arrival (unavailable when there is no route), inside and outside temperature, odometer, four tire pressures, vehicle state (online/asleep/offline), data age.
-- Binary sensors: status (connectivity), charge cable, Sentry mode, dashcam, user present, four doors, frunk, trunk, four windows.
+- Binary sensors: status (connectivity), charge cable, Sentry mode, dashcam, user present, four doors, charge port door, frunk, trunk, four windows.
 - Update: software version (read-only; no install action).
 - Device tracker: location (unless turned off). Distance and time to arrival still work when location is off; they come from `drive_state`, not coordinates.
 

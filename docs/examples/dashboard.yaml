@@ -35,6 +35,8 @@ sections:
       - type: tile
         entity: sensor.example_car_time_to_arrival
       - type: tile
+        entity: binary_sensor.example_car_charge_port_door
+      - type: tile
         entity: binary_sensor.example_car_dashcam
       - type: tile
         entity: binary_sensor.example_car_user_present

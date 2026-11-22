@@ -5,7 +5,7 @@
 Adds read-only Home Assistant entities that were missing from the v0.8.2 migration, built from the `vehicle_data` payload the coordinator already fetches (no new API calls, no wakes). The MCP server is unchanged apart from the version number (tool counts unchanged: 26 read-only, 67 with commands on, 71 with both opt-ins).
 
 - Sensors: charge energy added (kWh), charge rate (speed, miles per hour native, same as HA core), time to full charge (timestamp from remaining minutes, same as HA core), speed (null treated as 0), distance to arrival and time to arrival (unavailable when there is no route). Arrival distance and time are kept even when the location option is off; they do not expose coordinates.
-- Binary sensors: dashcam (on when the car reports `Recording`) and user present.
+- Binary sensors: dashcam (on when the car reports `Recording`), user present, and charge port door.
 - Update entity: installed and latest software versions from `vehicle_state` (read-only; no install action).
 - Keys, translation keys and native units mirror HA core's `tesla_fleet`, so entity ids line up with the old ones.
 
