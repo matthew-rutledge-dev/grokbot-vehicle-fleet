@@ -1,4 +1,4 @@
-"""Grok Bot Vehicle Fleet: Home Assistant integration (cloud polling, read-only by default)."""
+"""Vehicle Fleet: Home Assistant integration (cloud polling, read-only by default)."""
 
 from __future__ import annotations
 

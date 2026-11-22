@@ -279,7 +279,7 @@ When an alert needs an action, the agent comes back through this plugin's confir
 
 ## Home Assistant integration (first version, 0.8.0)
 
-`custom_components/vehicle_fleet/` is a Home Assistant custom integration ("Grok Bot Vehicle Fleet", domain `vehicle_fleet`), installable as a HACS custom repository. It signs in with your own Fleet API application through Home Assistant's Application credentials, and is **read-only by default**:
+`custom_components/vehicle_fleet/` is a Home Assistant custom integration ("Vehicle Fleet", domain `vehicle_fleet`), installable as a HACS custom repository. It signs in with your own Fleet API application through Home Assistant's Application credentials, and is **read-only by default**:
 
 - Each poll reads the vehicle summary first (never wakes the car) and makes the billed `vehicle_data` read only when the car is already online. Asleep or offline: no data read; sensors keep their last values and a data-age sensor shows when they were read. Default interval 15 minutes, minimum 5.
 - It never wakes the car on its own; the only wake is a Wake button you press.

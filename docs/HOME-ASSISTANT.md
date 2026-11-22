@@ -1,12 +1,12 @@
 # Home Assistant integration: `vehicle_fleet` (0.8.0, first version)
 
-A Home Assistant custom integration in `custom_components/vehicle_fleet/`. Display name: **Grok Bot Vehicle Fleet**. Works with Tesla vehicles through the official Fleet API, using your own developer application. It is a separate Python package and shares no runtime code with the Node MCP server in `mcp/vehicle-fleet/`; the two share only the version number.
+A Home Assistant custom integration in `custom_components/vehicle_fleet/`. Display name: **Vehicle Fleet**. Works with Tesla vehicles through the official Fleet API, using your own developer application. It is a separate Python package and shares no runtime code with the Node MCP server in `mcp/vehicle-fleet/`; the two share only the version number.
 
 Status: first version, not yet released or field-tested. Read-only by default.
 
 ## Install
 
-- **HACS (custom repository):** add this repository as a custom repository of type *Integration*, install **Grok Bot Vehicle Fleet**, restart Home Assistant.
+- **HACS (custom repository):** add this repository as a custom repository of type *Integration*, install **Vehicle Fleet**, restart Home Assistant.
 - **Manual:** copy `custom_components/vehicle_fleet/` into your Home Assistant `config/custom_components/`, restart.
 
 `hacs.json` declares Home Assistant 2025.6 as the minimum; the tests run on the current Home Assistant release only, so older versions are untested.
@@ -23,7 +23,7 @@ You need the same things as the MCP plugin (see the main README, "Before you sta
 
 ## Set up
 
-1. Settings → Devices & services → Add integration → **Grok Bot Vehicle Fleet**.
+1. Settings → Devices & services → Add integration → **Vehicle Fleet**.
 2. Enter your application's client ID and client secret (stored by Home Assistant's *Application credentials*).
 3. Sign in and approve the scopes. Home Assistant stores the refresh token and refreshes the access token itself.
 4. Pick the region, or **Auto-detect** (asks `/api/1/users/region` on the North America then Europe endpoint, the same as the MCP server; a reply is used only if it is a Fleet API host).

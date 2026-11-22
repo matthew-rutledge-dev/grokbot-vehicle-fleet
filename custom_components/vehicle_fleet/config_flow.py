@@ -1,4 +1,4 @@
-"""Config and options flow for the Grok Bot Vehicle Fleet integration."""
+"""Config and options flow for the Vehicle Fleet integration."""
 
 from __future__ import annotations
 
